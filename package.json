@@ -1,0 +1,127 @@
+{
+  "name": "data-peek",
+  "displayName": "Data Peek",
+  "description": "Inspect CSV, Parquet and Excel files directly in VS Code without writing code.",
+  "version": "0.1.0",
+  "publisher": "local-data-tools",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Data Science",
+    "Visualization"
+  ],
+  "keywords": [
+    "csv",
+    "parquet",
+    "excel",
+    "xlsx",
+    "dataframe",
+    "data viewer"
+  ],
+  "activationEvents": [
+    "onCustomEditor:dataPeek.preview",
+    "onCommand:dataPeek.open"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dataPeek.open",
+        "title": "Open with Data Peek",
+        "category": "Data Peek",
+        "icon": "$(table)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dataPeek.open",
+          "when": "resourceExtname =~ /\\.(csv|tsv|parquet|xlsx|xlsm)$/i",
+          "group": "navigation@20"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "dataPeek.open",
+          "when": "resourceExtname =~ /\\.(csv|tsv|parquet|xlsx|xlsm)$/i",
+          "group": "navigation@20"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "dataPeek.preview",
+        "displayName": "Data Peek",
+        "selector": [
+          { "filenamePattern": "*.csv" },
+          { "filenamePattern": "*.tsv" },
+          { "filenamePattern": "*.parquet" },
+          { "filenamePattern": "*.xlsx" },
+          { "filenamePattern": "*.xlsm" }
+        ],
+        "priority": "option"
+      }
+    ],
+    "configuration": {
+      "title": "Data Peek",
+      "properties": {
+        "dataPeek.previewRows": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "Maximum number of data rows loaded into an interactive preview."
+        },
+        "dataPeek.maxExcelFileSizeMB": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Maximum Excel workbook size loaded into memory, in MB."
+        },
+        "dataPeek.maxExcelExpandedSizeMB": {
+          "type": "number",
+          "default": 250,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Maximum total uncompressed size allowed inside an Excel workbook, in MB. Protects against zip bombs."
+        },
+        "dataPeek.maxColumns": {
+          "type": "number",
+          "default": 500,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Maximum number of columns loaded into an interactive preview."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run package",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc --noEmit",
+    "test": "tsc --outDir .test-dist --noEmit false && node --test .test-dist/test/dataReader.test.js",
+    "package": "pnpm run check && pnpm run build"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.1",
+    "exceljs": "^4.4.0",
+    "hyparquet": "^1.26.2",
+    "hyparquet-compressors": "^1.1.1",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/vscode": "^1.125.0",
+    "esbuild": "^0.28.1",
+    "hyparquet-writer": "^0.16.1",
+    "@types/yauzl": "^3.4.0",
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

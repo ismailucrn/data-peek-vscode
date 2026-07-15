@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.test-dist/
+.pnpm-store/
+sample-data/
+*.vsix
+.DS_Store
+pnpm-debug.log*
