@@ -40,7 +40,6 @@ export interface TableViewState {
   filters: ColumnFilter[];
   sort?: SortState;
   ui?: {
-    pageSize?: 25 | 50 | 100 | 250;
     columnWidths?: Record<string, number>;
     hiddenColumns?: number[];
     pinnedColumns?: number[];

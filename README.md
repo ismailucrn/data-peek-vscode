@@ -7,7 +7,7 @@ Data Peek opens CSV, TSV, Parquet and modern Excel workbooks in an interactive, 
 - Right-click a supported file in Explorer and select **Open with Data Peek**.
 - Preview `.csv`, `.tsv`, `.parquet`, `.xlsx` and `.xlsm` files.
 - Search across the loaded preview and combine type-aware column filters with `AND` logic.
-- Sort by any column and page through rows.
+- Sort by any column and continuously scroll through a two-axis virtualized table.
 - Resize, hide and pin columns; layout preferences stay with the open editor panel.
 - Navigate cells by keyboard and inspect or copy the complete selected value safely.
 - Inspect searchable preview-based profiles with missing/unique ratios, distributions, top values and data-quality warnings.
@@ -37,9 +37,7 @@ During development, use `pnpm run watch` and keep the Extension Development Host
 ## Planned next steps
 
 - Configurable CSV and TSV parsing options.
-- Virtualized rendering for larger previews.
 - Exporting filtered data and generated Pandas/Polars code.
-- Optional editable transformations with an explicit save/export flow.
 
 ## License
 
