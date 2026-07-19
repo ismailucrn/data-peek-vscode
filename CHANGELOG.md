@@ -4,6 +4,24 @@ All notable changes to Data Peek are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-07-19
+
+### Changed
+
+- Precompiled active filters, reused sort/number formatters, and removed repeated scroll-time layout allocations.
+- Deferred profile distribution DOM until details are opened and reduced large-list DOM mutations.
+- Combined distinct/top-value profiling into one bounded pass without sorting every unique value.
+
+### Fixed
+
+- Preserved the true column extent of sparse Excel sheets without walking or materializing every empty row gap.
+- Stopped reader work promptly when an editor load is cancelled or disposed.
+- Safely normalized invalid dates and values that cannot be serialized or converted to text.
+
+### Security
+
+- Reject webview messages with unknown fields, oversized parsing values, or embedded row/path payloads.
+
 ## [0.6.0] - 2026-07-19
 
 ### Added
@@ -63,6 +81,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Search, sorting, pagination, worksheet selection, and bounded column profiles.
 - Safety limits for wide data, large cells, Excel archives, and Parquet previews.
 
+[0.6.1]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.3.0...v0.4.0

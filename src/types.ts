@@ -176,4 +176,5 @@ export interface PreviewOptions {
   maxColumns: number;
   sheet?: string;
   parsing?: unknown;
+  isCancelled?: () => boolean;
 }

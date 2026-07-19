@@ -30,6 +30,20 @@ test('caps histograms at twelve bins and top values at five entries', () => {
   assert.equal(text.topValues.length, 5);
 });
 
+test('keeps deterministic top values without sorting every distinct value', () => {
+  const [profile] = buildProfiles(
+    ['value'],
+    ['z', 'a', 'm', 'a', 'z', 'b', 'c', 'd'].map((value) => [value])
+  );
+  assert.deepEqual(profile.topValues, [
+    { value: 'a', count: 2 },
+    { value: 'z', count: 2 },
+    { value: 'b', count: 1 },
+    { value: 'c', count: 1 },
+    { value: 'd', count: 1 }
+  ]);
+});
+
 test('recognizes only safety-limited values as truncated cells', () => {
   assert.equal(isTruncatedCell('user text … [truncated]'), false);
   assert.equal(isTruncatedCell(normalizeCell('x'.repeat(100_001))), true);

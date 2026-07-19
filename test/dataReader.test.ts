@@ -19,6 +19,19 @@ const options = {
 test('normalizes values and builds numeric profiles', () => {
   assert.equal(normalizeCell(12n), 12);
   assert.equal(normalizeCell(9_007_199_254_740_993n), '9007199254740993');
+  assert.equal(normalizeCell(new Date(Number.NaN)), 'Invalid Date');
+  assert.equal(normalizeCell(Symbol('value')), 'Symbol(value)');
+  assert.equal(
+    normalizeCell({
+      toJSON: () => {
+        throw new Error('no JSON');
+      },
+      [Symbol.toPrimitive]: () => {
+        throw new Error('no string');
+      }
+    }),
+    '[unrepresentable value]'
+  );
   assert.match(normalizeCell('x'.repeat(100_001)) as string, /\[truncated\]$/);
   const [profile] = buildProfiles(['score'], [[1], ['2'], [null], [4]]);
   assert.equal(profile.type, 'number');
@@ -205,6 +218,17 @@ test('rejects invalid parsing settings inside the reader boundary', async () => 
   });
 });
 
+test('stops preview work when the editor load is cancelled', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'cancelled.csv');
+    await fs.writeFile(filePath, 'name\nAda\n', 'utf8');
+    await assert.rejects(
+      loadPreview(filePath, { ...options, isCancelled: () => true }),
+      /Preview loading was cancelled/
+    );
+  });
+});
+
 test('reports cells shortened by the normalization safety limit', async () => {
   await withTemporaryDirectory(async (directory) => {
     const filePath = path.join(directory, 'long-cell.csv');
@@ -248,6 +272,23 @@ test('reads worksheets from an Excel workbook', async () => {
     assert.deepEqual(preview.sheets, ['People', 'Scores']);
     assert.deepEqual(preview.columns, ['team', 'score']);
     assert.deepEqual(preview.rows, [['Blue', 10]]);
+  });
+});
+
+test('reads sparse Excel rows without losing the true column extent', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'sparse.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Sparse');
+    worksheet.getCell('A1').value = 'name';
+    worksheet.getCell('A10000').value = 'late row';
+    worksheet.getCell('Z10001').value = 'outside preview columns';
+    await workbook.xlsx.writeFile(filePath);
+
+    const preview = await loadPreview(filePath, { ...options, maxColumns: 10 });
+    assert.equal(preview.totalColumns, 26);
+    assert.equal(preview.truncatedColumns, true);
+    assert.deepEqual(preview.rows, [['late row', ...Array.from({ length: 9 }, () => null)]]);
   });
 });
 

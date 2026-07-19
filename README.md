@@ -39,9 +39,11 @@ During development, use `pnpm run watch` and keep the Extension Development Host
 
 CSV and TSV editors expose parsing controls for automatic or explicit delimiters, UTF-8/UTF-16LE/Latin-1 encoding, headerless data, skipped leading rows, quote and escape characters, null tokens, and decimal/thousands separators. Applying an option safely reloads only the bounded preview. These choices remain in the open editor session and are not carried to other files.
 
-## Planned next steps
+## Near-term focus
 
-- Exporting filtered data and generated Pandas/Polars code.
+- Keep preview processing responsive at the configured row, column and cell limits.
+- Expand malformed and adversarial fixture coverage for every supported format.
+- Complete accessibility, cross-platform and clean-profile smoke testing.
 
 ## License
 

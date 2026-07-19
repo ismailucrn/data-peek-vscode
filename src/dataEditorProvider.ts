@@ -74,7 +74,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           maxExcelExpandedSizeMB: configuration.get<number>('maxExcelExpandedSizeMB', 250),
           maxColumns: configuration.get<number>('maxColumns', 500),
           sheet: selectedSheet,
-          parsing: parsingSettings
+          parsing: parsingSettings,
+          isCancelled: () => disposed || cancellationToken.isCancellationRequested
         });
         if (disposed || cancellationToken.isCancellationRequested) return false;
         selectedSheet = preview.sheet;

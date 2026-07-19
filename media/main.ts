@@ -498,6 +498,7 @@ function renderProfiles(): void {
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
   elements.profilesNote.textContent = `Based on preview · ${visibleProfiles.length} of ${dataset.profiles.length}`;
   if (collapsed) return;
+  const fragment = document.createDocumentFragment();
   for (const profile of visibleProfiles) {
     const card = document.createElement('article');
     card.className = 'profile-card';
@@ -535,17 +536,24 @@ function renderProfiles(): void {
       const summary = document.createElement('summary');
       summary.textContent = 'Distribution details';
       details.appendChild(summary);
-      if (profile.histogram?.length) renderHistogram(details, profile.histogram);
-      if (profile.topValues.length) renderTopValues(details, profile.topValues);
+      let detailsRendered = false;
+      details.addEventListener('toggle', () => {
+        if (!details.open || detailsRendered) return;
+        detailsRendered = true;
+        if (profile.histogram?.length) renderHistogram(details, profile.histogram);
+        if (profile.topValues.length) renderTopValues(details, profile.topValues);
+      });
       card.appendChild(details);
     }
-    elements.profiles.appendChild(card);
+    fragment.appendChild(card);
   }
+  elements.profiles.appendChild(fragment);
 }
 
 function renderQualityWarnings(): void {
   if (!dataset) return;
   elements.qualityWarnings.replaceChildren();
+  const fragment = document.createDocumentFragment();
   for (const warning of dataset.qualityWarnings) {
     const item = document.createElement('div');
     item.className = `quality-warning quality-${warning.code}`;
@@ -556,8 +564,9 @@ function renderQualityWarnings(): void {
     const message = document.createElement('span');
     message.textContent = warning.message;
     item.append(icon, message);
-    elements.qualityWarnings.appendChild(item);
+    fragment.appendChild(item);
   }
+  elements.qualityWarnings.appendChild(fragment);
   elements.qualitySection.classList.toggle('hidden', dataset.qualityWarnings.length === 0);
 }
 
@@ -895,18 +904,32 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
       event.stopPropagation();
       const startX = event.clientX;
       const startWidth = columnWidth(columnIndex);
+      let nextWidth = startWidth;
+      let pointerFrame = 0;
       resizeHandle.setPointerCapture(event.pointerId);
       const move = (moveEvent: PointerEvent): void => {
-        setColumnWidth(columnIndex, startWidth + moveEvent.clientX - startX, false);
+        nextWidth = startWidth + moveEvent.clientX - startX;
+        if (pointerFrame) return;
+        pointerFrame = window.requestAnimationFrame(() => {
+          pointerFrame = 0;
+          setColumnWidth(columnIndex, nextWidth, false);
+        });
       };
       const finish = (): void => {
         resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', finish);
+        resizeHandle.removeEventListener('pointercancel', finish);
+        if (pointerFrame) {
+          window.cancelAnimationFrame(pointerFrame);
+          pointerFrame = 0;
+        }
+        setColumnWidth(columnIndex, nextWidth, false);
         persistState();
         renderTable();
       };
       resizeHandle.addEventListener('pointermove', move);
-      resizeHandle.addEventListener('pointerup', finish, { once: true });
-      resizeHandle.addEventListener('pointercancel', finish, { once: true });
+      resizeHandle.addEventListener('pointerup', finish);
+      resizeHandle.addEventListener('pointercancel', finish);
     });
     resizeHandle.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -942,6 +965,7 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
 function renderColumnsMenu(): void {
   if (!dataset) return;
   elements.columnsList.replaceChildren();
+  const fragment = document.createDocumentFragment();
   const hidden = new Set(tableState.ui?.hiddenColumns ?? []);
   const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
   const visibleCount = dataset.columns.length - hidden.size;
@@ -986,8 +1010,9 @@ function renderColumnsMenu(): void {
     });
 
     item.append(visibility, pin);
-    elements.columnsList.appendChild(item);
+    fragment.appendChild(item);
   });
+  elements.columnsList.appendChild(fragment);
 }
 
 function currentColumnOrder(): number[] {
