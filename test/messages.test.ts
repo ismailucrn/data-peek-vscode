@@ -7,6 +7,7 @@ test('accepts bounded clipboard requests with preview indexes', () => {
     isWebviewMessage({ type: 'copy', kind: 'cell', rowIndex: 12, columnIndex: 4 }),
     true
   );
+  assert.equal(isWebviewMessage({ type: 'updateParsing', settings: null }), true);
 });
 
 test('rejects unknown, oversized and out-of-range webview messages', () => {
@@ -18,6 +19,13 @@ test('rejects unknown, oversized and out-of-range webview messages', () => {
   );
   assert.equal(
     isWebviewMessage({ type: 'copy', kind: 'rawData', rowIndex: 0, columnIndex: 0 }),
+    false
+  );
+  assert.equal(
+    isWebviewMessage({
+      type: 'updateParsing',
+      settings: { nullTokens: Array.from({ length: 22 }, () => 'NA') }
+    }),
     false
   );
 });

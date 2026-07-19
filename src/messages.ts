@@ -7,6 +7,21 @@ export function isWebviewMessage(value: unknown): value is WebviewToHostMessage 
   if (message.type === 'selectSheet') {
     return typeof message.sheet === 'string' && message.sheet.length <= 128;
   }
+  if (message.type === 'updateParsing') {
+    if (message.settings === null) return true;
+    if (!message.settings || typeof message.settings !== 'object' || Array.isArray(message.settings)) {
+      return false;
+    }
+    const settings = message.settings as Record<string, unknown>;
+    return (
+      (!Array.isArray(settings.nullTokens) || settings.nullTokens.length <= 21) &&
+      (!Array.isArray(settings.nullTokens) ||
+        settings.nullTokens.every((token) => typeof token === 'string' && token.length <= 65)) &&
+      Object.values(settings).every(
+        (item) => typeof item !== 'string' || item.length <= 128
+      )
+    );
+  }
   return (
     message.type === 'copy' &&
     (message.kind === 'cell' || message.kind === 'row' || message.kind === 'columnName') &&

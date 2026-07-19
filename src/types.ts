@@ -104,6 +104,31 @@ export interface TruncationInfo {
   cells: number;
 }
 
+export type DelimiterOption = 'auto' | 'comma' | 'semicolon' | 'tab' | 'pipe' | 'custom';
+export type DelimitedEncoding = 'utf8' | 'utf16le' | 'latin1';
+export type HeaderMode = 'firstNonEmpty' | 'none';
+export type DecimalSeparator = 'dot' | 'comma';
+export type ThousandsSeparator = 'none' | 'comma' | 'dot' | 'space';
+
+export interface DelimitedParsingSettings {
+  delimiter: DelimiterOption;
+  customDelimiter?: string;
+  encoding: DelimitedEncoding;
+  header: HeaderMode;
+  skipRows: number;
+  quote: string;
+  escape: string;
+  nullTokens: string[];
+  decimalSeparator: DecimalSeparator;
+  thousandsSeparator: ThousandsSeparator;
+}
+
+export interface DelimitedParsingMetadata {
+  detectedDelimiter: string;
+  resolvedDelimiter: string;
+  applied: DelimitedParsingSettings;
+}
+
 export interface DatasetPreview {
   fileName: string;
   format: 'CSV' | 'TSV' | 'PARQUET' | 'EXCEL';
@@ -119,6 +144,7 @@ export interface DatasetPreview {
   truncation: TruncationInfo;
   qualityWarnings: QualityWarning[];
   profileScope: 'preview';
+  parsing?: DelimitedParsingMetadata;
   sheet?: string;
   sheets?: string[];
 }
@@ -129,13 +155,19 @@ export type WebviewToHostMessage =
   | { type: 'ready' }
   | { type: 'reload' }
   | { type: 'selectSheet'; sheet: string }
+  | { type: 'updateParsing'; settings: unknown }
   | { type: 'copy'; kind: CopyKind; rowIndex: number; columnIndex: number };
 
 export type HostToWebviewMessage =
   | { type: 'loading' }
   | { type: 'dataset'; payload: DatasetPreview }
   | { type: 'error'; message: string }
-  | { type: 'operationResult'; operation: 'copy'; success: boolean; message: string };
+  | {
+      type: 'operationResult';
+      operation: 'copy' | 'parsing';
+      success: boolean;
+      message: string;
+    };
 
 export interface PreviewOptions {
   limit: number;
@@ -143,4 +175,5 @@ export interface PreviewOptions {
   maxExcelExpandedSizeMB: number;
   maxColumns: number;
   sheet?: string;
+  parsing?: unknown;
 }

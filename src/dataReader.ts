@@ -4,8 +4,20 @@ import { parse } from 'csv-parse';
 import ExcelJS from 'exceljs';
 import { buildQualityWarnings } from './dataQuality';
 import { validateExcelArchive } from './excelArchive';
+import {
+  defaultDelimitedParsingSettings,
+  delimiterCharacter,
+  localizedNumber,
+  validateDelimitedParsingSettings
+} from './parsing';
 import { buildProfiles, isTruncatedCell, normalizeCell } from './profile';
-import { DatasetPreview, PreviewOptions, SerializableCell } from './types';
+import {
+  DatasetPreview,
+  DelimitedParsingMetadata,
+  DelimitedParsingSettings,
+  PreviewOptions,
+  SerializableCell
+} from './types';
 
 const SUPPORTED_EXTENSIONS = new Set(['.csv', '.tsv', '.parquet', '.xlsx', '.xlsm']);
 const MAX_CSV_RECORD_BYTES = 2 * 1024 * 1024;
@@ -30,12 +42,19 @@ export async function loadPreview(
   }
 
   if (extension === '.csv' || extension === '.tsv') {
+    const parsingResult = validateDelimitedParsingSettings(
+      options.parsing ?? defaultDelimitedParsingSettings()
+    );
+    if (!parsingResult.value) {
+      throw new Error(`Invalid parsing settings: ${parsingResult.error ?? 'unknown error'}`);
+    }
     return readDelimited(
       filePath,
       stat.size,
-      extension === '.tsv' ? '\t' : undefined,
+      extension === '.tsv' ? 'TSV' : 'CSV',
       limit,
-      maxColumns
+      maxColumns,
+      parsingResult.value
     );
   }
   if (extension === '.parquet') {
@@ -61,16 +80,26 @@ export async function loadPreview(
 async function readDelimited(
   filePath: string,
   fileSize: number,
-  forcedDelimiter: string | undefined,
+  format: 'CSV' | 'TSV',
   limit: number,
-  maxColumns: number
+  maxColumns: number,
+  settings: DelimitedParsingSettings
 ): Promise<DatasetPreview> {
-  const delimiter = forcedDelimiter ?? (await detectDelimiter(filePath));
+  const detectedDelimiter = await detectDelimiter(
+    filePath,
+    settings,
+    format === 'TSV' ? '\t' : ','
+  );
+  const delimiter = delimiterCharacter(settings.delimiter, settings.customDelimiter) ?? detectedDelimiter;
   const input = createReadStream(filePath);
   const parser = input.pipe(
     parse({
       bom: true,
       delimiter,
+      encoding: settings.encoding,
+      escape: settings.escape,
+      from_line: settings.skipRows + 1,
+      quote: settings.quote,
       relax_column_count: true,
       relax_quotes: true,
       max_record_size: MAX_CSV_RECORD_BYTES,
@@ -88,15 +117,25 @@ async function readDelimited(
     for await (const rawRecord of parser) {
       const rawValues = rawRecord as unknown[];
       totalColumns = Math.max(totalColumns, rawValues.length);
-      const record = rawValues.slice(0, maxColumns).map(normalizeCell);
+      const rawRecordValues = rawValues.slice(0, maxColumns).map(normalizeCell);
       if (columns.length === 0) {
-        columns = uniqueHeaders(record);
+        columns =
+          settings.header === 'firstNonEmpty'
+            ? uniqueHeaders(rawRecordValues)
+            : Array.from(
+                { length: rawRecordValues.length },
+                (_unused, index) => `column_${index + 1}`
+              );
         effectiveLimit = previewRowLimit(limit, columns.length);
-        continue;
+        if (settings.header === 'firstNonEmpty') continue;
       }
+      const record = rawValues
+        .slice(0, maxColumns)
+        .map((value) => delimitedCellValue(value, settings));
       ensureColumns(columns, Math.min(record.length, maxColumns));
       effectiveLimit = previewRowLimit(limit, columns.length);
       if (rows.length >= effectiveLimit) {
+        if (rows.length > effectiveLimit) rows.length = effectiveLimit;
         sawExtraRow = true;
         break;
       }
@@ -110,13 +149,18 @@ async function readDelimited(
   normalizeRowWidths(rows, columns.length);
   return makePreview({
     filePath,
-    format: forcedDelimiter === '\t' ? 'TSV' : 'CSV',
+    format,
     fileSize,
     columns,
     totalColumns,
     rows,
     totalRows: sawExtraRow ? null : rows.length,
-    truncated: sawExtraRow
+    truncated: sawExtraRow,
+    parsing: {
+      detectedDelimiter,
+      resolvedDelimiter: delimiter,
+      applied: settings
+    }
   });
 }
 
@@ -264,27 +308,48 @@ function excelCellValue(cell: ExcelJS.Cell): SerializableCell {
   return normalizeCell(value);
 }
 
-async function detectDelimiter(filePath: string): Promise<string> {
+async function detectDelimiter(
+  filePath: string,
+  settings: DelimitedParsingSettings,
+  fallback: string
+): Promise<string> {
   const handle = await fs.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const sample = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/, 5).join('\n');
-    const candidates = [',', ';', '\t', '|'];
+    const sample = buffer
+      .subarray(0, bytesRead)
+      .toString(settings.encoding)
+      .split(/\r?\n/)
+      .slice(settings.skipRows, settings.skipRows + 5)
+      .join('\n');
+    const candidates = [',', ';', '\t', '|'].filter((candidate) => candidate !== settings.quote);
     return candidates
-      .map((delimiter) => ({ delimiter, count: countOutsideQuotes(sample, delimiter) }))
-      .sort((left, right) => right.count - left.count)[0]?.delimiter ?? ',';
+      .map((delimiter) => ({
+        delimiter,
+        count: countOutsideQuotes(sample, delimiter, settings.quote, settings.escape)
+      }))
+      .sort((left, right) => right.count - left.count)
+      .find((candidate) => candidate.count > 0)?.delimiter ?? fallback;
   } finally {
     await handle.close();
   }
 }
 
-function countOutsideQuotes(text: string, delimiter: string): number {
+function countOutsideQuotes(
+  text: string,
+  delimiter: string,
+  quote: string,
+  escape: string
+): number {
   let inQuotes = false;
   let count = 0;
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === '"') {
-      if (inQuotes && text[index + 1] === '"') {
+    if (text[index] === quote) {
+      if (inQuotes && text[index - 1] === escape) {
+        continue;
+      }
+      if (inQuotes && quote === escape && text[index + 1] === quote) {
         index += 1;
       } else {
         inQuotes = !inQuotes;
@@ -294,6 +359,20 @@ function countOutsideQuotes(text: string, delimiter: string): number {
     }
   }
   return count;
+}
+
+function delimitedCellValue(
+  value: unknown,
+  settings: DelimitedParsingSettings
+): SerializableCell {
+  if (typeof value !== 'string') return normalizeCell(value);
+  if (settings.nullTokens.includes(value)) return null;
+  const numeric = localizedNumber(
+    value,
+    settings.decimalSeparator,
+    settings.thousandsSeparator
+  );
+  return numeric ?? normalizeCell(value);
 }
 
 function uniqueHeaders(values: SerializableCell[]): string[] {
@@ -334,6 +413,7 @@ function makePreview(input: {
   truncated: boolean;
   sheet?: string;
   sheets?: string[];
+  parsing?: DelimitedParsingMetadata;
 }): DatasetPreview {
   const profiles = buildProfiles(input.columns, input.rows);
   const totalColumns = input.totalColumns ?? input.columns.length;
@@ -360,6 +440,7 @@ function makePreview(input: {
     truncation,
     qualityWarnings: buildQualityWarnings(profiles, input.rows, truncation),
     profileScope: 'preview',
+    parsing: input.parsing,
     sheet: input.sheet,
     sheets: input.sheets
   };
