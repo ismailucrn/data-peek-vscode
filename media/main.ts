@@ -10,6 +10,13 @@ import { formatCellDetail } from '../src/cellView';
 import {
   DEFAULT_COLUMN_WIDTH,
   NavigationKey,
+  VIRTUAL_HEADER_HEIGHT,
+  VIRTUAL_OVERSCAN,
+  VIRTUAL_ROW_HEIGHT,
+  VirtualColumnRange,
+  VirtualRange,
+  calculateVirtualColumns,
+  calculateVirtualRange,
   clampColumnWidth,
   estimateColumnWidth,
   navigateSelection,
@@ -22,6 +29,7 @@ import {
   DatasetPreview,
   FilterOperator,
   HostToWebviewMessage,
+  IndexedRow,
   SerializableCell,
   TableViewState
 } from '../src/types';
@@ -68,7 +76,6 @@ const elements = {
   search: requiredElement<HTMLInputElement>('search'),
   sheetWrap: requiredElement<HTMLElement>('sheet-wrap'),
   sheet: requiredElement<HTMLSelectElement>('sheet'),
-  pageSize: requiredElement<HTMLSelectElement>('page-size'),
   columnsMenuToggle: requiredElement<HTMLButtonElement>('columns-menu-toggle'),
   columnsMenu: requiredElement<HTMLElement>('columns-menu'),
   columnsList: requiredElement<HTMLElement>('columns-list'),
@@ -82,13 +89,10 @@ const elements = {
   toggleProfiles: requiredElement<HTMLButtonElement>('toggle-profiles'),
   tableHead: requiredElement<HTMLElement>('table-head'),
   tableBody: requiredElement<HTMLElement>('table-body'),
-  tableColumns: requiredElement<HTMLElement>('table-columns'),
+  tableSurface: requiredElement<HTMLElement>('table-surface'),
   tableScroll: requiredElement<HTMLElement>('table-scroll'),
   empty: requiredElement<HTMLElement>('empty'),
   resultCount: requiredElement<HTMLElement>('result-count'),
-  previous: requiredElement<HTMLButtonElement>('previous'),
-  next: requiredElement<HTMLButtonElement>('next'),
-  pageLabel: requiredElement<HTMLElement>('page-label'),
   filterPanel: requiredElement<HTMLElement>('filter-panel'),
   filterTitle: requiredElement<HTMLElement>('filter-title'),
   filterOperator: requiredElement<HTMLSelectElement>('filter-operator'),
@@ -114,38 +118,53 @@ const elements = {
 
 let dataset: DatasetPreview | null = null;
 let tableState: TableViewState = { ...EMPTY_TABLE_VIEW_STATE, filters: [] };
-let page = 0;
 let searchTimer = 0;
 let activeFilterColumn: number | null = null;
 let filterSequence = 0;
 let statusTimer = 0;
+let scrollFrame = 0;
+let resizeFrame = 0;
+let virtualRows: IndexedRow[] = [];
+let virtualPinnedColumns: number[] = [];
+let virtualScrollingColumns: number[] = [];
+let renderedRows: VirtualRange = { start: -1, end: -1 };
+let renderedColumns = '';
 
 elements.reload.addEventListener('click', () => vscode.postMessage({ type: 'reload' }));
 elements.search.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
     tableState = { ...tableState, query: elements.search.value };
-    page = 0;
+    resetTablePosition();
     persistState();
     renderTable();
   }, 120);
 });
-elements.pageSize.addEventListener('change', () => {
-  tableState = { ...tableState, ui: { ...tableState.ui, pageSize: currentPageSize() } };
-  page = 0;
-  persistState();
-  renderTable();
-});
 elements.sheet.addEventListener('change', () => {
   vscode.postMessage({ type: 'selectSheet', sheet: elements.sheet.value });
 });
-elements.previous.addEventListener('click', () => {
-  page = Math.max(0, page - 1);
-  renderTable();
+elements.tableScroll.addEventListener('scroll', () => {
+  if (scrollFrame) return;
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = 0;
+    renderVirtualViewport();
+  });
+}, { passive: true });
+elements.tableBody.addEventListener('click', (event) => {
+  const cell = (event.target as HTMLElement).closest<HTMLElement>('[role="gridcell"]');
+  const rowIndex = Number(cell?.dataset.rowIndex);
+  const columnIndex = Number(cell?.dataset.columnIndex);
+  if (Number.isInteger(rowIndex) && Number.isInteger(columnIndex)) {
+    selectCell({ rowIndex, columnIndex }, true);
+  }
 });
-elements.next.addEventListener('click', () => {
-  page += 1;
-  renderTable();
+elements.tableBody.addEventListener('keydown', (event) => handleCellKeydown(event));
+window.addEventListener('resize', () => {
+  if (!dataset || resizeFrame) return;
+  resizeFrame = window.requestAnimationFrame(() => {
+    resizeFrame = 0;
+    renderTable();
+  });
 });
 elements.columnsMenuToggle.addEventListener('click', () => {
   const opening = elements.columnsMenu.classList.contains('hidden');
@@ -174,7 +193,7 @@ elements.filterApply.addEventListener('click', applyFilter);
 elements.filterCancel.addEventListener('click', closeFilterPanel);
 elements.clearFilters.addEventListener('click', () => {
   tableState = { ...tableState, filters: [] };
-  page = 0;
+  resetTablePosition();
   closeFilterPanel();
   persistState();
   renderTable();
@@ -221,14 +240,18 @@ function receiveDataset(nextDataset: DatasetPreview): void {
     persisted?.datasetSignature === signature
       ? normalizeTableViewState(persisted.table, nextDataset)
       : { ...EMPTY_TABLE_VIEW_STATE, filters: [] };
-  page = 0;
   activeFilterColumn = null;
   elements.search.value = tableState.query;
-  elements.pageSize.value = String(tableState.ui?.pageSize ?? 50);
   elements.profileSearch.value = tableState.ui?.profileQuery ?? '';
+  elements.tableScroll.scrollTop = 0;
+  elements.tableScroll.scrollLeft = 0;
   closeFilterPanel();
   persistState();
   renderDataset();
+  const restoredSelection = tableState.ui?.selectedCell;
+  if (restoredSelection) {
+    window.requestAnimationFrame(() => selectCell(restoredSelection));
+  }
 }
 
 function renderDataset(): void {
@@ -426,68 +449,175 @@ function addStat(list: HTMLElement, label: string, value: string): void {
 
 function renderTable(): void {
   if (!dataset) return;
-  const filtered = applyTableView(dataset, tableState);
+  virtualRows = applyTableView(dataset, tableState);
   const columnOrder = currentColumnOrder();
-  const pageSize = currentPageSize();
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  page = Math.min(page, pageCount - 1);
-  const start = page * pageSize;
-  const visible = filtered.slice(start, start + pageSize);
-  const selection = ensureVisibleSelection(
-    visible.map((item) => item.index),
+  const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
+  virtualPinnedColumns = columnOrder.filter((columnIndex) => pinned.has(columnIndex));
+  virtualScrollingColumns = columnOrder.filter((columnIndex) => !pinned.has(columnIndex));
+  const selection = ensureValidSelection(
+    virtualRows.map((item) => item.index),
     columnOrder
   );
-
-  renderColumnDefinitions(columnOrder);
-  renderHeaders(columnOrder, visible.map((item) => item.row));
-  renderFilterChips();
-  elements.tableBody.replaceChildren();
-  for (const item of visible) {
-    const rowElement = document.createElement('tr');
-    rowElement.setAttribute('role', 'row');
-    rowElement.setAttribute('aria-rowindex', String(item.index + 2));
-    const indexCell = document.createElement('td');
-    indexCell.className = 'row-index';
-    indexCell.textContent = String(item.index + 1);
-    indexCell.setAttribute('role', 'rowheader');
-    rowElement.appendChild(indexCell);
-    for (const columnIndex of columnOrder) {
-      const value = item.row[columnIndex] ?? null;
-      const cell = document.createElement('td');
-      cell.dataset.type = dataset?.profiles[columnIndex]?.type ?? 'text';
-      cell.dataset.rowIndex = String(item.index);
-      cell.dataset.columnIndex = String(columnIndex);
-      applyColumnDimensions(cell, columnIndex);
-      cell.setAttribute('role', 'gridcell');
-      cell.setAttribute('aria-colindex', String(columnIndex + 2));
-      const selected =
-        selection?.rowIndex === item.index && selection.columnIndex === columnIndex;
-      cell.tabIndex = selected ? 0 : -1;
-      cell.setAttribute('aria-selected', String(selected));
-      if (selected) cell.classList.add('selected');
-      applyPinnedStyle(cell, columnIndex);
-      renderCell(cell, value);
-      cell.addEventListener('click', () =>
-        selectCell({ rowIndex: item.index, columnIndex }, true)
-      );
-      cell.addEventListener('keydown', (event) => handleCellKeydown(event));
-      rowElement.appendChild(cell);
-    }
-    elements.tableBody.appendChild(rowElement);
-  }
-
-  elements.empty.classList.toggle('hidden', filtered.length !== 0);
+  const contentWidth = 54 + [...virtualPinnedColumns, ...virtualScrollingColumns].reduce(
+    (width, columnIndex) => width + columnWidth(columnIndex),
+    0
+  );
+  elements.tableSurface.style.width = `${Math.max(contentWidth, elements.tableScroll.clientWidth)}px`;
+  elements.tableSurface.style.height = `${VIRTUAL_HEADER_HEIGHT + virtualRows.length * VIRTUAL_ROW_HEIGHT}px`;
+  elements.tableScroll.setAttribute('aria-rowcount', String(dataset.rows.length + 1));
+  elements.tableScroll.setAttribute('aria-colcount', String(dataset.columns.length + 1));
+  elements.empty.classList.toggle('hidden', virtualRows.length !== 0);
   renderCellDetail(selection);
+  renderFilterChips();
   const viewIsFiltered = tableState.query.trim().length > 0 || tableState.filters.length > 0;
   elements.resultCount.textContent = viewIsFiltered
-    ? `${formatNumber(filtered.length)} matching preview rows.`
-    : `${formatNumber(filtered.length)} preview rows.`;
-  elements.pageLabel.textContent = `Page ${page + 1} of ${pageCount}`;
-  elements.previous.disabled = page === 0;
-  elements.next.disabled = page >= pageCount - 1;
+    ? `${formatNumber(virtualRows.length)} matching preview rows.`
+    : `${formatNumber(virtualRows.length)} preview rows.`;
+  renderedRows = { start: -1, end: -1 };
+  renderedColumns = '';
+  renderVirtualViewport();
 }
 
-function renderCell(cell: HTMLTableCellElement, value: SerializableCell): void {
+function renderVirtualViewport(): void {
+  if (!dataset) return;
+  const rowRange = calculateVirtualRange(
+    virtualRows.length,
+    VIRTUAL_ROW_HEIGHT,
+    elements.tableScroll.scrollTop,
+    Math.max(0, elements.tableScroll.clientHeight - VIRTUAL_HEADER_HEIGHT)
+  );
+  const pinnedWidth = 54 + virtualPinnedColumns.reduce(
+    (width, columnIndex) => width + columnWidth(columnIndex),
+    0
+  );
+  const columnRange = calculateVirtualColumns(
+    virtualScrollingColumns.map(columnWidth),
+    elements.tableScroll.scrollLeft,
+    Math.max(0, elements.tableScroll.clientWidth - pinnedWidth),
+    VIRTUAL_OVERSCAN
+  );
+  const columnSignature = [
+    virtualPinnedColumns.join(','),
+    columnRange.start,
+    columnRange.end,
+    columnRange.before,
+    columnRange.after
+  ].join(':');
+  if (columnSignature !== renderedColumns) {
+    renderedColumns = columnSignature;
+    renderHeaders(columnRange);
+  }
+  if (
+    rowRange.start !== renderedRows.start ||
+    rowRange.end !== renderedRows.end ||
+    columnSignature !== elements.tableBody.dataset.columnSignature
+  ) {
+    renderedRows = rowRange;
+    elements.tableBody.dataset.columnSignature = columnSignature;
+    reconcileVirtualRows(rowRange, columnRange);
+  }
+}
+
+function reconcileVirtualRows(rowRange: VirtualRange, columnRange: VirtualColumnRange): void {
+  const count = rowRange.end - rowRange.start;
+  while (elements.tableBody.children.length < count) {
+    const row = document.createElement('div');
+    row.className = 'virtual-row';
+    row.setAttribute('role', 'row');
+    elements.tableBody.appendChild(row);
+  }
+  while (elements.tableBody.children.length > count) {
+    elements.tableBody.lastElementChild?.remove();
+  }
+  for (let slot = 0; slot < count; slot += 1) {
+    const itemPosition = rowRange.start + slot;
+    const item = virtualRows[itemPosition];
+    const row = elements.tableBody.children[slot] as HTMLElement;
+    row.style.top = `${VIRTUAL_HEADER_HEIGHT + itemPosition * VIRTUAL_ROW_HEIGHT}px`;
+    row.style.height = `${VIRTUAL_ROW_HEIGHT}px`;
+    row.dataset.rowIndex = String(item.index);
+    row.setAttribute('aria-rowindex', String(item.index + 2));
+    renderVirtualRow(row, item, columnRange);
+  }
+}
+
+function renderVirtualRow(
+  row: HTMLElement,
+  item: IndexedRow,
+  columnRange: VirtualColumnRange
+): void {
+  const scrollingColumns = virtualScrollingColumns.slice(columnRange.start, columnRange.end);
+  const required = 1 + virtualPinnedColumns.length + 1 + scrollingColumns.length + 1;
+  while (row.children.length < required) row.appendChild(document.createElement('div'));
+  while (row.children.length > required) row.lastElementChild?.remove();
+  let childIndex = 0;
+  const indexCell = row.children[childIndex++] as HTMLElement;
+  resetVirtualElement(indexCell, 'virtual-cell row-index');
+  setElementWidth(indexCell, 54);
+  indexCell.textContent = String(item.index + 1);
+  indexCell.setAttribute('role', 'rowheader');
+  for (const columnIndex of virtualPinnedColumns) {
+    configureDataCell(row.children[childIndex++] as HTMLElement, item, columnIndex, true);
+  }
+  configureSpacer(row.children[childIndex++] as HTMLElement, columnRange.before);
+  for (const columnIndex of scrollingColumns) {
+    configureDataCell(row.children[childIndex++] as HTMLElement, item, columnIndex, false);
+  }
+  configureSpacer(row.children[childIndex] as HTMLElement, columnRange.after);
+}
+
+function configureDataCell(
+  cell: HTMLElement,
+  item: IndexedRow,
+  columnIndex: number,
+  pinned: boolean
+): void {
+  if (!dataset) return;
+  const selection = tableState.ui?.selectedCell;
+  const selected = selection?.rowIndex === item.index && selection.columnIndex === columnIndex;
+  resetVirtualElement(cell, `virtual-cell${selected ? ' selected' : ''}`);
+  cell.dataset.type = dataset.profiles[columnIndex]?.type ?? 'text';
+  cell.dataset.rowIndex = String(item.index);
+  cell.dataset.columnIndex = String(columnIndex);
+  setElementWidth(cell, columnWidth(columnIndex));
+  cell.setAttribute('role', 'gridcell');
+  cell.setAttribute('aria-colindex', String(columnIndex + 2));
+  cell.setAttribute('aria-selected', String(selected));
+  cell.tabIndex = selected ? 0 : -1;
+  if (pinned) applyPinnedStyle(cell, columnIndex);
+  renderCell(cell, item.row[columnIndex] ?? null);
+}
+
+function resetVirtualElement(element: HTMLElement, className: string): void {
+  element.className = className;
+  element.textContent = '';
+  element.removeAttribute('style');
+  element.removeAttribute('title');
+  element.removeAttribute('aria-hidden');
+  element.removeAttribute('aria-colindex');
+  element.removeAttribute('aria-selected');
+  element.removeAttribute('role');
+  element.removeAttribute('data-type');
+  element.removeAttribute('data-row-index');
+  element.removeAttribute('data-column-index');
+  element.tabIndex = -1;
+}
+
+function configureSpacer(element: HTMLElement, width: number): void {
+  resetVirtualElement(element, 'virtual-spacer');
+  setElementWidth(element, width);
+  element.setAttribute('aria-hidden', 'true');
+  element.setAttribute('role', 'presentation');
+}
+
+function setElementWidth(element: HTMLElement, width: number): void {
+  element.style.width = `${width}px`;
+  element.style.minWidth = `${width}px`;
+  element.style.maxWidth = `${width}px`;
+  element.style.flexBasis = `${width}px`;
+}
+
+function renderCell(cell: HTMLElement, value: SerializableCell): void {
   if (value === null) {
     cell.classList.add('null');
     cell.textContent = 'null';
@@ -498,40 +628,41 @@ function renderCell(cell: HTMLTableCellElement, value: SerializableCell): void {
   cell.title = text;
 }
 
-function renderColumnDefinitions(columnOrder: number[]): void {
-  elements.tableColumns.replaceChildren();
-  const indexColumn = document.createElement('col');
-  indexColumn.style.width = '54px';
-  elements.tableColumns.appendChild(indexColumn);
-  for (const columnIndex of columnOrder) {
-    const column = document.createElement('col');
-    column.dataset.columnIndex = String(columnIndex);
-    column.style.width = `${columnWidth(columnIndex)}px`;
-    elements.tableColumns.appendChild(column);
-  }
-}
-
-function renderHeaders(columnOrder: number[], visibleRows: SerializableCell[][]): void {
+function renderHeaders(columnRange: VirtualColumnRange): void {
   if (!dataset) return;
   elements.tableHead.replaceChildren();
-  const row = document.createElement('tr');
-  row.setAttribute('role', 'row');
-  const indexHeader = document.createElement('th');
-  indexHeader.className = 'row-index';
+  const indexHeader = document.createElement('div');
+  indexHeader.className = 'virtual-cell virtual-header-cell row-index';
+  setElementWidth(indexHeader, 54);
   indexHeader.textContent = '#';
   indexHeader.setAttribute('role', 'columnheader');
-  row.appendChild(indexHeader);
+  elements.tableHead.appendChild(indexHeader);
+  for (const columnIndex of virtualPinnedColumns) {
+    elements.tableHead.appendChild(createHeaderCell(columnIndex, true));
+  }
+  const before = document.createElement('div');
+  configureSpacer(before, columnRange.before);
+  elements.tableHead.appendChild(before);
+  for (const columnIndex of virtualScrollingColumns.slice(columnRange.start, columnRange.end)) {
+    elements.tableHead.appendChild(createHeaderCell(columnIndex, false));
+  }
+  const after = document.createElement('div');
+  configureSpacer(after, columnRange.after);
+  elements.tableHead.appendChild(after);
+}
 
-  for (const columnIndex of columnOrder) {
-    const column = dataset.columns[columnIndex];
-    const header = document.createElement('th');
-    header.dataset.columnIndex = String(columnIndex);
-    applyColumnDimensions(header, columnIndex);
-    header.setAttribute('role', 'columnheader');
-    header.setAttribute('aria-colindex', String(columnIndex + 2));
-    applyPinnedStyle(header, columnIndex);
-    const controls = document.createElement('div');
-    controls.className = 'column-controls';
+function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
+  if (!dataset) throw new Error('Cannot render a header without a dataset.');
+  const column = dataset.columns[columnIndex];
+  const header = document.createElement('div');
+  header.className = 'virtual-cell virtual-header-cell';
+  header.dataset.columnIndex = String(columnIndex);
+  applyColumnDimensions(header, columnIndex);
+  header.setAttribute('role', 'columnheader');
+  header.setAttribute('aria-colindex', String(columnIndex + 2));
+  if (pinned) applyPinnedStyle(header, columnIndex);
+  const controls = document.createElement('div');
+  controls.className = 'column-controls';
 
     const sortButton = document.createElement('button');
     sortButton.type = 'button';
@@ -558,7 +689,7 @@ function renderHeaders(columnOrder: number[], visibleRows: SerializableCell[][])
             current?.columnIndex === columnIndex && current.direction === 'asc' ? 'desc' : 'asc'
         }
       };
-      page = 0;
+      resetTablePosition();
       persistState();
       renderTable();
     });
@@ -608,6 +739,7 @@ function renderHeaders(columnOrder: number[], visibleRows: SerializableCell[][])
         false
       );
       persistState();
+      renderTable();
     });
     resizeHandle.addEventListener('dblclick', (event) => {
       event.preventDefault();
@@ -616,16 +748,16 @@ function renderHeaders(columnOrder: number[], visibleRows: SerializableCell[][])
         columnIndex,
         estimateColumnWidth(
           column,
-          visibleRows.map((visibleRow) => visibleRow[columnIndex] ?? null)
+          virtualRows
+            .slice(Math.max(0, renderedRows.start), Math.max(0, renderedRows.end))
+            .map((item) => item.row[columnIndex] ?? null)
         )
       );
     });
 
-    controls.append(sortButton, filterButton, resizeHandle);
-    header.appendChild(controls);
-    row.appendChild(header);
-  }
-  elements.tableHead.appendChild(row);
+  controls.append(sortButton, filterButton, resizeHandle);
+  header.appendChild(controls);
+  return header;
 }
 
 function renderColumnsMenu(): void {
@@ -708,6 +840,7 @@ function setColumnWidth(columnIndex: number, width: number, render = true): void
     document.querySelectorAll<HTMLElement>(`[data-column-index="${columnIndex}"]`).forEach(
       (element) => {
         element.style.width = `${nextWidth}px`;
+        element.style.flexBasis = `${nextWidth}px`;
         if (element.tagName !== 'COL') {
           element.style.minWidth = `${nextWidth}px`;
           element.style.maxWidth = `${nextWidth}px`;
@@ -721,6 +854,7 @@ function setColumnWidth(columnIndex: number, width: number, render = true): void
 function applyColumnDimensions(element: HTMLElement, columnIndex: number): void {
   const width = `${columnWidth(columnIndex)}px`;
   element.style.width = width;
+  element.style.flexBasis = width;
   element.style.minWidth = width;
   element.style.maxWidth = width;
 }
@@ -743,7 +877,7 @@ function refreshPinnedOffsets(): void {
   });
 }
 
-function ensureVisibleSelection(rowOrder: number[], columnOrder: number[]): CellSelection | undefined {
+function ensureValidSelection(rowOrder: number[], columnOrder: number[]): CellSelection | undefined {
   if (!rowOrder.length || !columnOrder.length) return undefined;
   const current = tableState.ui?.selectedCell;
   const selection =
@@ -761,12 +895,13 @@ function ensureVisibleSelection(rowOrder: number[], columnOrder: number[]): Cell
 
 function selectCell(selection: CellSelection, focus = false): void {
   if (!dataset) return;
-  const filtered = applyTableView(dataset, tableState);
-  const rowPosition = filtered.findIndex((item) => item.index === selection.rowIndex);
+  const rowPosition = virtualRows.findIndex((item) => item.index === selection.rowIndex);
   if (rowPosition < 0 || !currentColumnOrder().includes(selection.columnIndex)) return;
-  page = Math.floor(rowPosition / currentPageSize());
   updateUi({ selectedCell: selection }, false);
-  renderTable();
+  scrollSelectionIntoView(selection, rowPosition);
+  renderedRows = { start: -1, end: -1 };
+  renderVirtualViewport();
+  renderCellDetail(selection);
   if (focus) {
     window.requestAnimationFrame(() => {
       elements.tableBody
@@ -778,18 +913,52 @@ function selectCell(selection: CellSelection, focus = false): void {
   }
 }
 
+function scrollSelectionIntoView(selection: CellSelection, rowPosition: number): void {
+  const rowTop = VIRTUAL_HEADER_HEIGHT + rowPosition * VIRTUAL_ROW_HEIGHT;
+  const rowBottom = rowTop + VIRTUAL_ROW_HEIGHT;
+  const visibleTop = elements.tableScroll.scrollTop + VIRTUAL_HEADER_HEIGHT;
+  const visibleBottom = elements.tableScroll.scrollTop + elements.tableScroll.clientHeight;
+  if (rowTop < visibleTop) {
+    elements.tableScroll.scrollTop = Math.max(0, rowTop - VIRTUAL_HEADER_HEIGHT);
+  } else if (rowBottom > visibleBottom) {
+    elements.tableScroll.scrollTop = rowBottom - elements.tableScroll.clientHeight;
+  }
+
+  if (virtualPinnedColumns.includes(selection.columnIndex)) return;
+  const scrollingPosition = virtualScrollingColumns.indexOf(selection.columnIndex);
+  if (scrollingPosition < 0) return;
+  const pinnedWidth = 54 + virtualPinnedColumns.reduce(
+    (width, columnIndex) => width + columnWidth(columnIndex),
+    0
+  );
+  const columnStart = virtualScrollingColumns
+    .slice(0, scrollingPosition)
+    .reduce((width, columnIndex) => width + columnWidth(columnIndex), 0);
+  const columnEnd = columnStart + columnWidth(selection.columnIndex);
+  const visibleWidth = Math.max(0, elements.tableScroll.clientWidth - pinnedWidth);
+  if (columnStart < elements.tableScroll.scrollLeft) {
+    elements.tableScroll.scrollLeft = columnStart;
+  } else if (columnEnd > elements.tableScroll.scrollLeft + visibleWidth) {
+    elements.tableScroll.scrollLeft = Math.max(0, columnEnd - visibleWidth);
+  }
+}
+
 function handleCellKeydown(event: KeyboardEvent): void {
   if (!dataset || !isNavigationKey(event.key)) return;
   const selection = tableState.ui?.selectedCell;
   if (!selection) return;
   event.preventDefault();
-  const filtered = applyTableView(dataset, tableState);
   const next = navigateSelection(
     selection,
     event.key,
-    filtered.map((item) => item.index),
+    virtualRows.map((item) => item.index),
     currentColumnOrder(),
-    currentPageSize()
+    Math.max(
+      1,
+      Math.floor(
+        (elements.tableScroll.clientHeight - VIRTUAL_HEADER_HEIGHT) / VIRTUAL_ROW_HEIGHT
+      )
+    )
   );
   selectCell(next, true);
 }
@@ -898,7 +1067,7 @@ function applyFilter(): void {
     return;
   }
   tableState = { ...tableState, filters: [...tableState.filters, filter] };
-  page = 0;
+  resetTablePosition();
   closeFilterPanel();
   persistState();
   renderTable();
@@ -921,7 +1090,7 @@ function renderFilterChips(): void {
         ...tableState,
         filters: tableState.filters.filter((candidate) => candidate.id !== filter.id)
       };
-      page = 0;
+      resetTablePosition();
       persistState();
       renderTable();
     });
@@ -960,9 +1129,13 @@ function selectedOperator(): FilterOperator {
   return elements.filterOperator.value as FilterOperator;
 }
 
-function currentPageSize(): 25 | 50 | 100 | 250 {
-  const value = Number(elements.pageSize.value);
-  return value === 25 || value === 100 || value === 250 ? value : 50;
+function resetTablePosition(): void {
+  elements.tableScroll.scrollTop = 0;
+  elements.tableScroll.scrollLeft = 0;
+  tableState = {
+    ...tableState,
+    ui: { ...tableState.ui, selectedCell: undefined }
+  };
 }
 
 function persistState(): void {

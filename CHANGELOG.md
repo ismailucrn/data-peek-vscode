@@ -4,6 +4,18 @@ All notable changes to Data Peek are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-19
+
+### Added
+
+- Continuous vertical and horizontal virtual scrolling with ten-item overscan.
+- Viewport-sized row reuse while pinned columns, sticky headers, selection, and keyboard navigation remain available.
+- Performance coverage for 5,000-row and 500-column layouts plus the 250,000-cell preview budget.
+
+### Changed
+
+- Replaced pagination and rows-per-page controls with a fixed-row-height virtual grid.
+
 ## [0.4.0] - 2026-07-19
 
 ### Added
@@ -43,6 +55,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Search, sorting, pagination, worksheet selection, and bounded column profiles.
 - Safety limits for wide data, large cells, Excel archives, and Parquet previews.
 
+[0.5.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.1.1...v0.2.0

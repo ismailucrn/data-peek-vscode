@@ -205,13 +205,9 @@ test('normalizes restored state against the current dataset', () => {
   assert.deepEqual(state.sort, { columnIndex: 2, direction: 'desc' });
 });
 
-test('restores only supported pagination preferences', () => {
+test('discards retired pagination preferences from restored state', () => {
   assert.deepEqual(
     normalizeTableViewState({ query: '', filters: [], ui: { pageSize: 100 } }, dataset),
-    { query: '', filters: [], ui: { pageSize: 100 } }
-  );
-  assert.deepEqual(
-    normalizeTableViewState({ query: '', filters: [], ui: { pageSize: 999 } }, dataset),
     { query: '', filters: [] }
   );
 });

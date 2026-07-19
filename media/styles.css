@@ -321,11 +321,34 @@ input[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBor
   gap: 12px;
 }
 .table-section { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
-.table-scroll { overflow: auto; max-height: calc(100vh - 360px); min-height: 240px; }
-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
-th, td {
-  max-width: 360px;
-  min-width: 120px;
+.table-scroll {
+  position: relative;
+  overflow: auto;
+  height: max(240px, calc(100vh - 360px));
+  min-height: 240px;
+  contain: strict;
+  overscroll-behavior: contain;
+}
+.table-surface { position: relative; min-width: 100%; }
+.virtual-header, .virtual-row {
+  display: flex;
+  width: 100%;
+}
+.virtual-header {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  height: 36px;
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--surface-raised));
+}
+.virtual-row {
+  position: absolute;
+  left: 0;
+  height: 34px;
+}
+.virtual-cell {
+  box-sizing: border-box;
+  flex: 0 0 auto;
   overflow: hidden;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -334,16 +357,15 @@ th, td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-th {
-  position: sticky;
+.virtual-header-cell {
+  position: relative;
   z-index: 2;
-  top: 0;
+  height: 36px;
   padding: 0;
   background: var(--vscode-editorGroupHeader-tabsBackground, var(--surface-raised));
 }
-tr:last-child td { border-bottom: 0; }
-th:last-child, td:last-child { border-right: 0; }
-tbody tr:hover td { background: var(--vscode-list-hoverBackground); }
+.virtual-row:hover .virtual-cell { background: var(--vscode-list-hoverBackground); }
+.virtual-spacer { flex: 0 0 auto; height: 100%; pointer-events: none; }
 .column-controls {
   position: relative;
   display: grid;
@@ -393,31 +415,37 @@ tbody tr:hover td { background: var(--vscode-list-hoverBackground); }
   position: sticky;
   z-index: 3;
   left: 0;
-  min-width: 54px;
-  width: 54px;
+  flex-basis: 54px;
   color: var(--muted);
   background: var(--vscode-editor-background);
   text-align: right;
 }
-th.row-index { z-index: 5; padding: 7px 10px; background: var(--vscode-editorGroupHeader-tabsBackground, var(--surface-raised)); }
-th.pinned { z-index: 4; }
-td.pinned {
+.virtual-header-cell.row-index { z-index: 7; padding: 7px 10px; background: var(--vscode-editorGroupHeader-tabsBackground, var(--surface-raised)); }
+.virtual-header-cell.pinned { z-index: 6; }
+.virtual-cell.pinned {
   position: sticky;
-  z-index: 2;
+  z-index: 4;
   background: var(--vscode-editor-background);
 }
-td[data-type='number'] { text-align: right; font-variant-numeric: tabular-nums; }
-td.null { color: var(--muted); font-style: italic; }
-td[role='gridcell'] { cursor: default; }
-td[role='gridcell'].selected {
-  position: relative;
+.virtual-cell[data-type='number'] { text-align: right; font-variant-numeric: tabular-nums; }
+.virtual-cell.null { color: var(--muted); font-style: italic; }
+.virtual-cell[role='gridcell'] { cursor: default; }
+.virtual-cell[role='gridcell'].selected {
+  z-index: 8;
   outline: 2px solid var(--vscode-focusBorder);
   outline-offset: -2px;
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
 }
-.empty { padding: 48px; color: var(--muted); text-align: center; }
-.pagination {
+.empty {
+  position: sticky;
+  left: 0;
+  width: 100%;
+  padding: 48px;
+  color: var(--muted);
+  text-align: center;
+}
+.table-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -428,7 +456,6 @@ td[role='gridcell'].selected {
   background: var(--surface-raised);
   font-size: 11px;
 }
-.pagination > div { display: flex; align-items: center; gap: 10px; }
 .preview-scope { margin-left: 3px; color: var(--muted); }
 
 .cell-detail {
@@ -485,5 +512,5 @@ td[role='gridcell'].selected {
   .quality-warning {
     border-color: CanvasText;
   }
-  td[role='gridcell'].selected { outline-color: Highlight; }
+  .virtual-cell[role='gridcell'].selected { outline-color: Highlight; }
 }

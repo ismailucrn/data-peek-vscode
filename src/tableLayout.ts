@@ -3,6 +3,20 @@ import { CellSelection, SerializableCell } from './types';
 export const MIN_COLUMN_WIDTH = 72;
 export const MAX_COLUMN_WIDTH = 600;
 export const DEFAULT_COLUMN_WIDTH = 160;
+export const VIRTUAL_ROW_HEIGHT = 34;
+export const VIRTUAL_HEADER_HEIGHT = 36;
+export const VIRTUAL_OVERSCAN = 10;
+
+export interface VirtualRange {
+  start: number;
+  end: number;
+}
+
+export interface VirtualColumnRange extends VirtualRange {
+  before: number;
+  after: number;
+  total: number;
+}
 
 export type NavigationKey =
   | 'ArrowLeft'
@@ -44,6 +58,63 @@ export function estimateColumnWidth(columnName: string, values: SerializableCell
     columnName.length
   );
   return clampColumnWidth(longest * 7.5 + 72);
+}
+
+export function calculateVirtualRange(
+  itemCount: number,
+  itemSize: number,
+  viewportStart: number,
+  viewportSize: number,
+  overscan = VIRTUAL_OVERSCAN
+): VirtualRange {
+  if (itemCount <= 0 || itemSize <= 0) return { start: 0, end: 0 };
+  const safeStart = Math.max(0, viewportStart);
+  const firstVisible = Math.min(itemCount - 1, Math.floor(safeStart / itemSize));
+  const visibleCount = Math.max(1, Math.ceil(Math.max(0, viewportSize) / itemSize));
+  return {
+    start: Math.max(0, firstVisible - Math.max(0, overscan)),
+    end: Math.min(itemCount, firstVisible + visibleCount + Math.max(0, overscan))
+  };
+}
+
+export function calculateVirtualColumns(
+  widths: number[],
+  viewportStart: number,
+  viewportSize: number,
+  overscan = VIRTUAL_OVERSCAN
+): VirtualColumnRange {
+  const total = widths.reduce((sum, width) => sum + Math.max(0, width), 0);
+  if (!widths.length) return { start: 0, end: 0, before: 0, after: 0, total };
+
+  const safeStart = Math.max(0, viewportStart);
+  const safeEnd = safeStart + Math.max(0, viewportSize);
+  let offset = 0;
+  let firstVisible = widths.length - 1;
+  let endVisible = widths.length;
+  for (let index = 0; index < widths.length; index += 1) {
+    const nextOffset = offset + Math.max(0, widths[index]);
+    if (nextOffset > safeStart) {
+      firstVisible = index;
+      break;
+    }
+    offset = nextOffset;
+  }
+  offset = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    if (offset >= safeEnd) {
+      endVisible = index;
+      break;
+    }
+    offset += Math.max(0, widths[index]);
+  }
+
+  const start = Math.max(0, firstVisible - Math.max(0, overscan));
+  const end = Math.min(widths.length, endVisible + Math.max(0, overscan));
+  const before = widths.slice(0, start).reduce((sum, width) => sum + Math.max(0, width), 0);
+  const rendered = widths
+    .slice(start, end)
+    .reduce((sum, width) => sum + Math.max(0, width), 0);
+  return { start, end, before, after: Math.max(0, total - before - rendered), total };
 }
 
 export function navigateSelection(

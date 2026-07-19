@@ -3,6 +3,9 @@ import test from 'node:test';
 import {
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
+  VIRTUAL_OVERSCAN,
+  calculateVirtualColumns,
+  calculateVirtualRange,
   clampColumnWidth,
   estimateColumnWidth,
   navigateSelection,
@@ -55,4 +58,29 @@ test('navigates cells using visible row and column order', () => {
     navigateSelection({ rowIndex: 20, columnIndex: 0 }, 'PageUp', rows, columns, 2),
     { rowIndex: 8, columnIndex: 0 }
   );
+});
+
+test('calculates bounded virtual row and variable-width column windows', () => {
+  assert.deepEqual(calculateVirtualRange(5_000, 34, 1_700, 340), {
+    start: 40,
+    end: 70
+  });
+  assert.deepEqual(calculateVirtualRange(4, 34, 0, 340), { start: 0, end: 4 });
+
+  const columns = calculateVirtualColumns([100, 200, 80, 120, 160], 250, 180, 1);
+  assert.deepEqual(columns, {
+    start: 0,
+    end: 5,
+    before: 0,
+    after: 0,
+    total: 660
+  });
+});
+
+test('keeps the virtual DOM window proportional at configured row and column limits', () => {
+  const rows = calculateVirtualRange(5_000, 34, 80_000, 680);
+  const columns = calculateVirtualColumns(Array.from({ length: 500 }, () => 160), 30_000, 960);
+  assert.ok(rows.end - rows.start <= 20 + VIRTUAL_OVERSCAN * 2);
+  assert.ok(columns.end - columns.start <= 7 + VIRTUAL_OVERSCAN * 2);
+  assert.ok((rows.end - rows.start) * (columns.end - columns.start) < 2_000);
 });

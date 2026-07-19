@@ -155,15 +155,6 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           <select id="sheet"></select>
         </label>
         <button id="columns-menu-toggle" class="button secondary" type="button" aria-expanded="false">Columns</button>
-        <label class="field compact">
-          <span>Rows per page</span>
-          <select id="page-size">
-            <option value="25">25</option>
-            <option value="50" selected>50</option>
-            <option value="100">100</option>
-            <option value="250">250</option>
-          </select>
-        </label>
       </div>
 
       <section id="columns-menu" class="columns-menu hidden" aria-labelledby="columns-title">
@@ -234,21 +225,16 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
 
       <div class="table-workspace">
         <section class="table-section" aria-label="Data preview">
-          <div id="table-scroll" class="table-scroll">
-            <table role="grid" aria-label="Loaded data preview">
-              <colgroup id="table-columns"></colgroup>
-              <thead id="table-head"></thead>
-              <tbody id="table-body"></tbody>
-            </table>
+          <div id="table-scroll" class="table-scroll" role="grid" aria-label="Loaded data preview" tabindex="-1">
+            <div id="table-surface" class="table-surface">
+              <div id="table-head" class="virtual-header" role="row" aria-rowindex="1"></div>
+              <div id="table-body" class="virtual-body" role="rowgroup"></div>
+            </div>
             <div id="empty" class="empty hidden">No preview rows match the active view.</div>
           </div>
-          <footer class="pagination">
+          <footer class="table-status">
             <span><span id="result-count"></span> <span class="preview-scope">Filters apply only to the loaded preview.</span></span>
-            <div>
-              <button id="previous" class="button small" type="button">Previous</button>
-              <span id="page-label"></span>
-              <button id="next" class="button small" type="button">Next</button>
-            </div>
+            <span>Scroll to explore the preview.</span>
           </footer>
         </section>
 

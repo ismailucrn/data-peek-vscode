@@ -130,11 +130,6 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
       };
     }
   }
-  const pageSize = normalizePageSize(
-    candidate.ui && typeof candidate.ui === 'object'
-      ? (candidate.ui as Record<string, unknown>).pageSize
-      : undefined
-  );
   const rawUi =
     candidate.ui && typeof candidate.ui === 'object'
       ? (candidate.ui as Record<string, unknown>)
@@ -154,7 +149,6 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
   const profileQuery =
     typeof rawUi?.profileQuery === 'string' ? rawUi.profileQuery.slice(0, 200) : undefined;
   const ui =
-    pageSize ||
     columnWidths ||
     hiddenColumns.length ||
     pinnedColumns.length ||
@@ -162,7 +156,6 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
     profilesCollapsed !== undefined ||
     profileQuery
       ? {
-          ...(pageSize ? { pageSize } : {}),
           ...(columnWidths ? { columnWidths } : {}),
           ...(hiddenColumns.length ? { hiddenColumns } : {}),
           ...(pinnedColumns.length ? { pinnedColumns } : {}),
@@ -345,10 +338,6 @@ function isFiniteNumber(value: string): boolean {
 
 function isValidDate(value: string): boolean {
   return value.trim().length > 0 && Number.isFinite(Date.parse(value));
-}
-
-function normalizePageSize(value: unknown): 25 | 50 | 100 | 250 | undefined {
-  return value === 25 || value === 50 || value === 100 || value === 250 ? value : undefined;
 }
 
 function normalizeColumnWidths(

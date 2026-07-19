@@ -45,6 +45,25 @@ test('caps wide CSV previews and reports the source column count', async () => {
   });
 });
 
+test('preserves the 250,000-cell budget at configured row and column limits', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'cell-budget.csv');
+    const header = Array.from({ length: 500 }, (_unused, index) => `c${index}`).join(',');
+    const row = Array.from({ length: 500 }, (_unused, index) => String(index)).join(',');
+    await fs.writeFile(
+      filePath,
+      `${header}\n${Array.from({ length: 600 }, () => row).join('\n')}\n`,
+      'utf8'
+    );
+
+    const preview = await loadPreview(filePath, { ...options, limit: 5_000, maxColumns: 500 });
+    assert.equal(preview.columns.length, 500);
+    assert.equal(preview.rows.length, 500);
+    assert.equal(preview.rows.length * preview.columns.length, 250_000);
+    assert.equal(preview.truncation.rows, true);
+  });
+});
+
 test('reads a quoted CSV preview and reports truncation', async () => {
   await withTemporaryDirectory(async (directory) => {
     const filePath = path.join(directory, 'people.csv');
