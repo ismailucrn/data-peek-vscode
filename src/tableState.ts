@@ -135,7 +135,30 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
       ? (candidate.ui as Record<string, unknown>).pageSize
       : undefined
   );
-  const ui = pageSize ? { pageSize } : undefined;
+  const rawUi =
+    candidate.ui && typeof candidate.ui === 'object'
+      ? (candidate.ui as Record<string, unknown>)
+      : undefined;
+  const columnWidths = normalizeColumnWidths(rawUi?.columnWidths, dataset.columns.length);
+  const hiddenColumns = normalizeColumnIndexes(rawUi?.hiddenColumns, dataset.columns.length);
+  const pinnedColumns = normalizeColumnIndexes(rawUi?.pinnedColumns, dataset.columns.length).filter(
+    (columnIndex) => !hiddenColumns.includes(columnIndex)
+  );
+  const selectedCell = normalizeSelection(
+    rawUi?.selectedCell,
+    dataset.rows.length,
+    dataset.columns.length
+  );
+  const ui =
+    pageSize || columnWidths || hiddenColumns.length || pinnedColumns.length || selectedCell
+      ? {
+          ...(pageSize ? { pageSize } : {}),
+          ...(columnWidths ? { columnWidths } : {}),
+          ...(hiddenColumns.length ? { hiddenColumns } : {}),
+          ...(pinnedColumns.length ? { pinnedColumns } : {}),
+          ...(selectedCell ? { selectedCell } : {})
+        }
+      : undefined;
   return {
     query,
     filters,
@@ -314,4 +337,58 @@ function isValidDate(value: string): boolean {
 
 function normalizePageSize(value: unknown): 25 | 50 | 100 | 250 | undefined {
   return value === 25 || value === 50 || value === 100 || value === 250 ? value : undefined;
+}
+
+function normalizeColumnWidths(
+  value: unknown,
+  columnCount: number
+): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const widths: Record<string, number> = {};
+  for (const [key, rawWidth] of Object.entries(value as Record<string, unknown>)) {
+    const columnIndex = Number(key);
+    if (
+      Number.isInteger(columnIndex) &&
+      columnIndex >= 0 &&
+      columnIndex < columnCount &&
+      typeof rawWidth === 'number' &&
+      Number.isFinite(rawWidth)
+    ) {
+      widths[String(columnIndex)] = Math.round(Math.min(600, Math.max(72, rawWidth)));
+    }
+  }
+  return Object.keys(widths).length ? widths : undefined;
+}
+
+function normalizeColumnIndexes(value: unknown, columnCount: number): number[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value)].filter(
+    (columnIndex): columnIndex is number =>
+      typeof columnIndex === 'number' &&
+      Number.isInteger(columnIndex) &&
+      columnIndex >= 0 &&
+      columnIndex < columnCount
+  );
+}
+
+function normalizeSelection(
+  value: unknown,
+  rowCount: number,
+  columnCount: number
+): { rowIndex: number; columnIndex: number } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.rowIndex !== 'number' ||
+    !Number.isInteger(candidate.rowIndex) ||
+    candidate.rowIndex < 0 ||
+    candidate.rowIndex >= rowCount ||
+    typeof candidate.columnIndex !== 'number' ||
+    !Number.isInteger(candidate.columnIndex) ||
+    candidate.columnIndex < 0 ||
+    candidate.columnIndex >= columnCount
+  ) {
+    return undefined;
+  }
+  return { rowIndex: candidate.rowIndex, columnIndex: candidate.columnIndex };
 }

@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { copyCellText, copyRowAsTsv } from './clipboard';
 import { isSupportedFile, loadPreview } from './dataReader';
+import { isWebviewMessage } from './messages';
+import { DatasetPreview, WebviewToHostMessage } from './types';
 
 class DataDocument implements vscode.CustomDocument {
   constructor(readonly uri: vscode.Uri) {}
@@ -37,6 +40,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
     let queued = false;
     let disposed = false;
     let readyReceived = false;
+    let latestPreview: DatasetPreview | undefined;
 
     const refresh = async (): Promise<void> => {
       if (disposed || cancellationToken.isCancellationRequested) return;
@@ -58,6 +62,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         if (disposed || cancellationToken.isCancellationRequested) return;
         selectedSheet = preview.sheet;
         availableSheets = new Set(preview.sheets ?? []);
+        latestPreview = preview;
         await webviewPanel.webview.postMessage({ type: 'dataset', payload: preview });
       } catch (error) {
         if (disposed || cancellationToken.isCancellationRequested) return;
@@ -88,6 +93,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         ) {
           selectedSheet = message.sheet;
           void refresh();
+        } else if (message.type === 'copy') {
+          void copyFromPreview(message, latestPreview, webviewPanel.webview);
         }
       }
     );
@@ -147,6 +154,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           <span>Worksheet</span>
           <select id="sheet"></select>
         </label>
+        <button id="columns-menu-toggle" class="button secondary" type="button" aria-expanded="false">Columns</button>
         <label class="field compact">
           <span>Rows per page</span>
           <select id="page-size">
@@ -157,6 +165,19 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           </select>
         </label>
       </div>
+
+      <section id="columns-menu" class="columns-menu hidden" aria-labelledby="columns-title">
+        <div class="columns-menu-heading">
+          <div>
+            <span class="eyebrow">TABLE LAYOUT</span>
+            <h2 id="columns-title">Columns</h2>
+          </div>
+          <button id="show-all-columns" class="link-button" type="button">Show all</button>
+        </div>
+        <div id="columns-list" class="columns-list"></div>
+      </section>
+
+      <div id="operation-status" class="operation-status hidden" role="status" aria-live="polite"></div>
 
       <section id="filter-panel" class="filter-panel hidden" aria-labelledby="filter-title">
         <div class="filter-panel-heading">
@@ -197,23 +218,43 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         <div id="profiles" class="profiles"></div>
       </section>
 
-      <section class="table-section" aria-label="Data preview">
-        <div id="table-scroll" class="table-scroll">
-          <table>
-            <thead id="table-head"></thead>
-            <tbody id="table-body"></tbody>
-          </table>
-          <div id="empty" class="empty hidden">No preview rows match the active view.</div>
-        </div>
-        <footer class="pagination">
-          <span><span id="result-count"></span> <span class="preview-scope">Filters apply only to the loaded preview.</span></span>
-          <div>
-            <button id="previous" class="button small" type="button">Previous</button>
-            <span id="page-label"></span>
-            <button id="next" class="button small" type="button">Next</button>
+      <div class="table-workspace">
+        <section class="table-section" aria-label="Data preview">
+          <div id="table-scroll" class="table-scroll">
+            <table role="grid" aria-label="Loaded data preview">
+              <colgroup id="table-columns"></colgroup>
+              <thead id="table-head"></thead>
+              <tbody id="table-body"></tbody>
+            </table>
+            <div id="empty" class="empty hidden">No preview rows match the active view.</div>
           </div>
-        </footer>
-      </section>
+          <footer class="pagination">
+            <span><span id="result-count"></span> <span class="preview-scope">Filters apply only to the loaded preview.</span></span>
+            <div>
+              <button id="previous" class="button small" type="button">Previous</button>
+              <span id="page-label"></span>
+              <button id="next" class="button small" type="button">Next</button>
+            </div>
+          </footer>
+        </section>
+
+        <aside id="cell-detail" class="cell-detail hidden" aria-labelledby="cell-detail-title">
+          <div class="cell-detail-heading">
+            <div>
+              <span class="eyebrow">SELECTED CELL</span>
+              <h2 id="cell-detail-title"></h2>
+            </div>
+            <span id="cell-detail-type" class="type"></span>
+          </div>
+          <div id="cell-detail-null" class="cell-null hidden">Null value</div>
+          <pre id="cell-detail-value" tabindex="0"></pre>
+          <div class="cell-actions">
+            <button id="copy-cell" class="button small" type="button">Copy cell</button>
+            <button id="copy-row" class="button small secondary" type="button">Copy row</button>
+            <button id="copy-column-name" class="button small secondary" type="button">Copy column name</button>
+          </div>
+        </aside>
+      </div>
     </section>
   </main>
   <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -226,8 +267,54 @@ function getNonce(): string {
   return randomBytes(24).toString('base64url');
 }
 
-function isWebviewMessage(value: unknown): value is { type: string; sheet?: string } {
-  if (!value || typeof value !== 'object') return false;
-  const message = value as Record<string, unknown>;
-  return typeof message.type === 'string' && ['ready', 'reload', 'selectSheet'].includes(message.type);
+async function copyFromPreview(
+  message: Extract<WebviewToHostMessage, { type: 'copy' }>,
+  preview: DatasetPreview | undefined,
+  webview: vscode.Webview
+): Promise<void> {
+  if (
+    !preview ||
+    message.rowIndex >= preview.rows.length ||
+    message.columnIndex >= preview.columns.length
+  ) {
+    await webview.postMessage({
+      type: 'operationResult',
+      operation: 'copy',
+      success: false,
+      message: 'The selected preview cell is no longer available.'
+    });
+    return;
+  }
+  try {
+    const text =
+      message.kind === 'cell'
+        ? copyCellText(preview.rows[message.rowIndex][message.columnIndex] ?? null)
+        : message.kind === 'columnName'
+          ? preview.columns[message.columnIndex]
+          : copyRowAsTsv(
+              Array.from(
+                { length: preview.columns.length },
+                (_, columnIndex) => preview.rows[message.rowIndex][columnIndex] ?? null
+              )
+            );
+    await vscode.env.clipboard.writeText(text);
+    await webview.postMessage({
+      type: 'operationResult',
+      operation: 'copy',
+      success: true,
+      message:
+        message.kind === 'cell'
+          ? 'Cell copied.'
+          : message.kind === 'row'
+            ? 'Row copied as TSV.'
+            : 'Column name copied.'
+    });
+  } catch {
+    await webview.postMessage({
+      type: 'operationResult',
+      operation: 'copy',
+      success: false,
+      message: 'Could not write to the clipboard.'
+    });
+  }
 }
