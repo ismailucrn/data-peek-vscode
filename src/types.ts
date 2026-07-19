@@ -30,12 +30,21 @@ export interface SortState {
   direction: 'asc' | 'desc';
 }
 
+export interface CellSelection {
+  rowIndex: number;
+  columnIndex: number;
+}
+
 export interface TableViewState {
   query: string;
   filters: ColumnFilter[];
   sort?: SortState;
   ui?: {
     pageSize?: 25 | 50 | 100 | 250;
+    columnWidths?: Record<string, number>;
+    hiddenColumns?: number[];
+    pinnedColumns?: number[];
+    selectedCell?: CellSelection;
   };
 }
 
@@ -70,6 +79,20 @@ export interface DatasetPreview {
   sheet?: string;
   sheets?: string[];
 }
+
+export type CopyKind = 'cell' | 'row' | 'columnName';
+
+export type WebviewToHostMessage =
+  | { type: 'ready' }
+  | { type: 'reload' }
+  | { type: 'selectSheet'; sheet: string }
+  | { type: 'copy'; kind: CopyKind; rowIndex: number; columnIndex: number };
+
+export type HostToWebviewMessage =
+  | { type: 'loading' }
+  | { type: 'dataset'; payload: DatasetPreview }
+  | { type: 'error'; message: string }
+  | { type: 'operationResult'; operation: 'copy'; success: boolean; message: string };
 
 export interface PreviewOptions {
   limit: number;

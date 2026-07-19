@@ -200,3 +200,31 @@ test('restores only supported pagination preferences', () => {
     { query: '', filters: [] }
   );
 });
+
+test('bounds restored column layout and cell selection state', () => {
+  assert.deepEqual(
+    normalizeTableViewState(
+      {
+        query: '',
+        filters: [],
+        ui: {
+          columnWidths: { 0: 12, 1: 240.4, 99: 300 },
+          hiddenColumns: [1, 1, 99],
+          pinnedColumns: [1, 2, 2],
+          selectedCell: { rowIndex: 2, columnIndex: 3 }
+        }
+      },
+      dataset
+    ),
+    {
+      query: '',
+      filters: [],
+      ui: {
+        columnWidths: { 0: 72, 1: 240 },
+        hiddenColumns: [1],
+        pinnedColumns: [2],
+        selectedCell: { rowIndex: 2, columnIndex: 3 }
+      }
+    }
+  );
+});
