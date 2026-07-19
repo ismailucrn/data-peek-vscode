@@ -2,9 +2,22 @@ import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'csv-parse';
 import ExcelJS from 'exceljs';
+import { buildQualityWarnings } from './dataQuality';
 import { validateExcelArchive } from './excelArchive';
-import { buildProfiles, normalizeCell } from './profile';
-import { DatasetPreview, PreviewOptions, SerializableCell } from './types';
+import {
+  defaultDelimitedParsingSettings,
+  delimiterCharacter,
+  localizedNumber,
+  validateDelimitedParsingSettings
+} from './parsing';
+import { buildProfiles, isTruncatedCell, normalizeCell } from './profile';
+import {
+  DatasetPreview,
+  DelimitedParsingMetadata,
+  DelimitedParsingSettings,
+  PreviewOptions,
+  SerializableCell
+} from './types';
 
 const SUPPORTED_EXTENSIONS = new Set(['.csv', '.tsv', '.parquet', '.xlsx', '.xlsm']);
 const MAX_CSV_RECORD_BYTES = 2 * 1024 * 1024;
@@ -19,8 +32,10 @@ export async function loadPreview(
   filePath: string,
   options: PreviewOptions
 ): Promise<DatasetPreview> {
+  ensureNotCancelled(options.isCancelled);
   const extension = path.extname(filePath).toLowerCase();
   const stat = await fs.stat(filePath);
+  ensureNotCancelled(options.isCancelled);
   const limit = clampInteger(options.limit, 100, 5000, 2000);
   const maxColumns = clampInteger(options.maxColumns, 10, 2000, 500);
 
@@ -29,16 +44,24 @@ export async function loadPreview(
   }
 
   if (extension === '.csv' || extension === '.tsv') {
+    const parsingResult = validateDelimitedParsingSettings(
+      options.parsing ?? defaultDelimitedParsingSettings()
+    );
+    if (!parsingResult.value) {
+      throw new Error(`Invalid parsing settings: ${parsingResult.error ?? 'unknown error'}`);
+    }
     return readDelimited(
       filePath,
       stat.size,
-      extension === '.tsv' ? '\t' : undefined,
+      extension === '.tsv' ? 'TSV' : 'CSV',
       limit,
-      maxColumns
+      maxColumns,
+      parsingResult.value,
+      options.isCancelled
     );
   }
   if (extension === '.parquet') {
-    return readParquet(filePath, stat.size, limit, maxColumns);
+    return readParquet(filePath, stat.size, limit, maxColumns, options.isCancelled);
   }
   if (extension === '.xlsx' || extension === '.xlsm') {
     const maximumBytes =
@@ -51,7 +74,8 @@ export async function loadPreview(
     const maxExpandedBytes =
       clampNumber(options.maxExcelExpandedSizeMB, 10, 2000, 250) * 1024 * 1024;
     await validateExcelArchive(filePath, maxExpandedBytes);
-    return readExcel(filePath, stat.size, limit, maxColumns, options.sheet);
+    ensureNotCancelled(options.isCancelled);
+    return readExcel(filePath, stat.size, limit, maxColumns, options.sheet, options.isCancelled);
   }
 
   throw new Error(`Unsupported file type: ${extension || '(no extension)'}`);
@@ -60,16 +84,30 @@ export async function loadPreview(
 async function readDelimited(
   filePath: string,
   fileSize: number,
-  forcedDelimiter: string | undefined,
+  format: 'CSV' | 'TSV',
   limit: number,
-  maxColumns: number
+  maxColumns: number,
+  settings: DelimitedParsingSettings,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
-  const delimiter = forcedDelimiter ?? (await detectDelimiter(filePath));
+  const detectedDelimiter = await detectDelimiter(
+    filePath,
+    settings,
+    format === 'TSV' ? '\t' : ',',
+    isCancelled
+  );
+  ensureNotCancelled(isCancelled);
+  const delimiter =
+    delimiterCharacter(settings.delimiter, settings.customDelimiter) ?? detectedDelimiter;
   const input = createReadStream(filePath);
   const parser = input.pipe(
     parse({
       bom: true,
       delimiter,
+      encoding: settings.encoding,
+      escape: settings.escape,
+      from_line: settings.skipRows + 1,
+      quote: settings.quote,
       relax_column_count: true,
       relax_quotes: true,
       max_record_size: MAX_CSV_RECORD_BYTES,
@@ -82,20 +120,32 @@ async function readDelimited(
   const rows: SerializableCell[][] = [];
   let sawExtraRow = false;
   let effectiveLimit = limit;
+  const nullTokens = new Set(settings.nullTokens);
 
   try {
     for await (const rawRecord of parser) {
+      ensureNotCancelled(isCancelled);
       const rawValues = rawRecord as unknown[];
       totalColumns = Math.max(totalColumns, rawValues.length);
-      const record = rawValues.slice(0, maxColumns).map(normalizeCell);
+      const rawRecordValues = rawValues.slice(0, maxColumns).map(normalizeCell);
       if (columns.length === 0) {
-        columns = uniqueHeaders(record);
+        columns =
+          settings.header === 'firstNonEmpty'
+            ? uniqueHeaders(rawRecordValues)
+            : Array.from(
+                { length: rawRecordValues.length },
+                (_unused, index) => `column_${index + 1}`
+              );
         effectiveLimit = previewRowLimit(limit, columns.length);
-        continue;
+        if (settings.header === 'firstNonEmpty') continue;
       }
+      const record = rawValues
+        .slice(0, maxColumns)
+        .map((value) => delimitedCellValue(value, settings, nullTokens));
       ensureColumns(columns, Math.min(record.length, maxColumns));
       effectiveLimit = previewRowLimit(limit, columns.length);
       if (rows.length >= effectiveLimit) {
+        if (rows.length > effectiveLimit) rows.length = effectiveLimit;
         sawExtraRow = true;
         break;
       }
@@ -109,13 +159,18 @@ async function readDelimited(
   normalizeRowWidths(rows, columns.length);
   return makePreview({
     filePath,
-    format: forcedDelimiter === '\t' ? 'TSV' : 'CSV',
+    format,
     fileSize,
     columns,
     totalColumns,
     rows,
     totalRows: sawExtraRow ? null : rows.length,
-    truncated: sawExtraRow
+    truncated: sawExtraRow,
+    parsing: {
+      detectedDelimiter,
+      resolvedDelimiter: delimiter,
+      applied: settings
+    }
   });
 }
 
@@ -123,12 +178,15 @@ async function readParquet(
   filePath: string,
   fileSize: number,
   limit: number,
-  maxColumns: number
+  maxColumns: number,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
   const [{ asyncBufferFromFile, parquetMetadataAsync, parquetRead, parquetSchema }, compressorModule] =
     await Promise.all([import('hyparquet'), import('hyparquet-compressors')]);
+  ensureNotCancelled(isCancelled);
   const file = await asyncBufferFromFile(filePath);
   const metadata = await parquetMetadataAsync(file);
+  ensureNotCancelled(isCancelled);
   const totalRowsBigInt = metadata.num_rows;
   if (totalRowsBigInt < 0n) {
     throw new Error('Invalid Parquet metadata: negative row count.');
@@ -153,6 +211,7 @@ async function readParquet(
       rawRows = data as unknown[][];
     }
   });
+  ensureNotCancelled(isCancelled);
   const rows = rawRows.map((row) => columns.map((_column, index) => normalizeCell(row[index])));
 
   return makePreview({
@@ -172,10 +231,12 @@ async function readExcel(
   fileSize: number,
   limit: number,
   maxColumns: number,
-  requestedSheet?: string
+  requestedSheet?: string,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
+  ensureNotCancelled(isCancelled);
   const sheets = workbook.worksheets.map((worksheet) => worksheet.name);
   const worksheet =
     (requestedSheet ? workbook.getWorksheet(requestedSheet) : undefined) ?? workbook.worksheets[0];
@@ -184,50 +245,45 @@ async function readExcel(
     throw new Error('The workbook does not contain a worksheet.');
   }
 
-  let headerRowNumber = 0;
-  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row = worksheet.getRow(rowNumber);
-    if (row.hasValues) {
-      headerRowNumber = rowNumber;
-      break;
-    }
-  }
+  const totalColumns = worksheet.columnCount;
+  let columns: string[] | undefined;
+  const rows: SerializableCell[][] = [];
+  let effectiveLimit = limit;
+  let sawExtraRow = false;
 
-  if (headerRowNumber === 0) {
+  worksheet.eachRow((row) => {
+    ensureNotCancelled(isCancelled);
+    if (!columns) {
+      const width = Math.min(Math.max(totalColumns, row.cellCount), maxColumns);
+      columns = uniqueHeaders(
+        Array.from({ length: width }, (_, index) => excelCellValue(row.getCell(index + 1)))
+      );
+      effectiveLimit = previewRowLimit(limit, columns.length);
+      return;
+    }
+    if (sawExtraRow) return;
+    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
+    if (values.every((value) => value === null)) return;
+    if (rows.length >= effectiveLimit) {
+      sawExtraRow = true;
+      return;
+    }
+    rows.push(values);
+  });
+
+  if (!columns) {
     return makePreview({
       filePath,
       format: 'EXCEL',
       fileSize,
       columns: [],
-      rows: [],
+      totalColumns,
+      rows,
       totalRows: 0,
       truncated: false,
       sheet: worksheet.name,
       sheets
     });
-  }
-
-  const headerRow = worksheet.getRow(headerRowNumber);
-  const totalColumns = Math.max(headerRow.cellCount, worksheet.actualColumnCount);
-  const width = Math.min(totalColumns, maxColumns);
-  const columns = uniqueHeaders(
-    Array.from({ length: width }, (_, index) => excelCellValue(headerRow.getCell(index + 1)))
-  );
-  const rows: SerializableCell[][] = [];
-  const effectiveLimit = previewRowLimit(limit, columns.length);
-  let sawExtraRow = false;
-
-  for (let rowNumber = headerRowNumber + 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row = worksheet.getRow(rowNumber);
-    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
-    if (values.every((value) => value === null)) {
-      continue;
-    }
-    if (rows.length >= effectiveLimit) {
-      sawExtraRow = true;
-      break;
-    }
-    rows.push(values);
   }
 
   return makePreview({
@@ -251,39 +307,63 @@ function excelCellValue(cell: ExcelJS.Cell): SerializableCell {
       return normalizeCell(value.result);
     }
     if ('richText' in value && Array.isArray(value.richText)) {
-      return value.richText.map((part) => part.text).join('');
+      return normalizeCell(value.richText.map((part) => part.text).join(''));
     }
     if ('text' in value && typeof value.text === 'string') {
-      return value.text;
+      return normalizeCell(value.text);
     }
     if ('error' in value && typeof value.error === 'string') {
-      return value.error;
+      return normalizeCell(value.error);
     }
   }
   return normalizeCell(value);
 }
 
-async function detectDelimiter(filePath: string): Promise<string> {
+async function detectDelimiter(
+  filePath: string,
+  settings: DelimitedParsingSettings,
+  fallback: string,
+  isCancelled?: () => boolean
+): Promise<string> {
+  ensureNotCancelled(isCancelled);
   const handle = await fs.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const sample = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/, 5).join('\n');
-    const candidates = [',', ';', '\t', '|'];
+    ensureNotCancelled(isCancelled);
+    const sample = buffer
+      .subarray(0, bytesRead)
+      .toString(settings.encoding)
+      .split(/\r?\n/)
+      .slice(settings.skipRows, settings.skipRows + 5)
+      .join('\n');
+    const candidates = [',', ';', '\t', '|'].filter((candidate) => candidate !== settings.quote);
     return candidates
-      .map((delimiter) => ({ delimiter, count: countOutsideQuotes(sample, delimiter) }))
-      .sort((left, right) => right.count - left.count)[0]?.delimiter ?? ',';
+      .map((delimiter) => ({
+        delimiter,
+        count: countOutsideQuotes(sample, delimiter, settings.quote, settings.escape)
+      }))
+      .sort((left, right) => right.count - left.count)
+      .find((candidate) => candidate.count > 0)?.delimiter ?? fallback;
   } finally {
     await handle.close();
   }
 }
 
-function countOutsideQuotes(text: string, delimiter: string): number {
+function countOutsideQuotes(
+  text: string,
+  delimiter: string,
+  quote: string,
+  escape: string
+): number {
   let inQuotes = false;
   let count = 0;
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === '"') {
-      if (inQuotes && text[index + 1] === '"') {
+    if (text[index] === quote) {
+      if (inQuotes && text[index - 1] === escape) {
+        continue;
+      }
+      if (inQuotes && quote === escape && text[index + 1] === quote) {
         index += 1;
       } else {
         inQuotes = !inQuotes;
@@ -293,6 +373,21 @@ function countOutsideQuotes(text: string, delimiter: string): number {
     }
   }
   return count;
+}
+
+function delimitedCellValue(
+  value: unknown,
+  settings: DelimitedParsingSettings,
+  nullTokens: ReadonlySet<string>
+): SerializableCell {
+  if (typeof value !== 'string') return normalizeCell(value);
+  if (nullTokens.has(value)) return null;
+  const numeric = localizedNumber(
+    value,
+    settings.decimalSeparator,
+    settings.thousandsSeparator
+  );
+  return numeric ?? normalizeCell(value);
 }
 
 function uniqueHeaders(values: SerializableCell[]): string[] {
@@ -333,22 +428,44 @@ function makePreview(input: {
   truncated: boolean;
   sheet?: string;
   sheets?: string[];
+  parsing?: DelimitedParsingMetadata;
 }): DatasetPreview {
+  const profiles = buildProfiles(input.columns, input.rows);
+  const totalColumns = input.totalColumns ?? input.columns.length;
+  const truncation = {
+    rows: input.truncated,
+    columns: totalColumns > input.columns.length,
+    cells: countTruncatedCells(input.rows)
+  };
   return {
     fileName: path.basename(input.filePath),
     format: input.format,
     fileSize: input.fileSize,
     columns: input.columns,
-    totalColumns: input.totalColumns ?? input.columns.length,
-    truncatedColumns: (input.totalColumns ?? input.columns.length) > input.columns.length,
+    totalColumns,
+    truncatedColumns: truncation.columns,
     rows: input.rows,
-    profiles: buildProfiles(input.columns, input.rows),
+    profiles,
     previewRowCount: input.rows.length,
     totalRows: input.totalRows,
     truncated: input.truncated,
+    truncation,
+    qualityWarnings: buildQualityWarnings(profiles, input.rows, truncation),
+    profileScope: 'preview',
+    parsing: input.parsing,
     sheet: input.sheet,
     sheets: input.sheets
   };
+}
+
+function countTruncatedCells(rows: SerializableCell[][]): number {
+  let count = 0;
+  for (const row of rows) {
+    for (const value of row) {
+      if (isTruncatedCell(value)) count += 1;
+    }
+  }
+  return count;
 }
 
 function previewRowLimit(requestedRows: number, columnCount: number): number {
@@ -393,6 +510,10 @@ function validateParquetPreviewSize(
 
 function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ensureNotCancelled(isCancelled: (() => boolean) | undefined): void {
+  if (isCancelled?.()) throw new Error('Preview loading was cancelled.');
 }
 
 function clampInteger(

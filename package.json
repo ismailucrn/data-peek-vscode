@@ -2,7 +2,7 @@
   "name": "data-peek",
   "displayName": "Data Peek",
   "description": "Inspect CSV, Parquet and Excel files directly in VS Code without writing code.",
-  "version": "0.1.1",
+  "version": "0.6.1",
   "publisher": "local-data-tools",
   "license": "MIT",
   "packageManager": "pnpm@10.34.5",
@@ -122,7 +122,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "check": "tsc --noEmit",
-    "test": "tsc --outDir .test-dist --noEmit false && node --test .test-dist/test/dataReader.test.js",
+    "test": "tsc --outDir .test-dist --noEmit false && node --test .test-dist/test/runTests.js",
     "package": "pnpm run check && pnpm run build",
     "vsix": "pnpm run package && vsce package --no-dependencies"
   },

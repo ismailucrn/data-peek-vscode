@@ -6,9 +6,12 @@ Data Peek opens CSV, TSV, Parquet and modern Excel workbooks in an interactive, 
 
 - Right-click a supported file in Explorer and select **Open with Data Peek**.
 - Preview `.csv`, `.tsv`, `.parquet`, `.xlsx` and `.xlsm` files.
-- Search across the loaded preview.
-- Sort by any column and page through rows.
-- Inspect inferred column types, missing values, distinct counts and basic ranges.
+- Search across the loaded preview and combine type-aware column filters with `AND` logic.
+- Sort by any column and continuously scroll through a two-axis virtualized table.
+- Resize, hide and pin columns; layout preferences stay with the open editor panel.
+- Navigate cells by keyboard and inspect or copy the complete selected value safely.
+- Inspect searchable preview-based profiles with missing/unique ratios, distributions, top values and data-quality warnings.
+- Reparse CSV and TSV previews with session-only delimiter, encoding, header, quote, null-token and locale-number settings.
 - Switch between worksheets in an Excel workbook.
 - Respect VS Code light, dark and high-contrast themes.
 
@@ -32,13 +35,15 @@ During development, use `pnpm run watch` and keep the Extension Development Host
 - `dataPeek.maxExcelExpandedSizeMB`: uncompressed Excel ZIP safety limit (default `250`).
 - `dataPeek.maxColumns`: maximum columns loaded into a preview (default `500`).
 
-## Planned next steps
+## CSV and TSV parsing
 
-- Per-column filters and configurable parsing options.
-- Virtualized rendering for larger previews.
-- Exporting filtered data and generated Pandas/Polars code.
-- Richer distributions, histograms and data quality warnings.
-- Optional editable transformations with an explicit save/export flow.
+CSV and TSV editors expose parsing controls for automatic or explicit delimiters, UTF-8/UTF-16LE/Latin-1 encoding, headerless data, skipped leading rows, quote and escape characters, null tokens, and decimal/thousands separators. Applying an option safely reloads only the bounded preview. These choices remain in the open editor session and are not carried to other files.
+
+## Near-term focus
+
+- Keep preview processing responsive at the configured row, column and cell limits.
+- Expand malformed and adversarial fixture coverage for every supported format.
+- Complete accessibility, cross-platform and clean-profile smoke testing.
 
 ## License
 
