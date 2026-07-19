@@ -210,10 +210,24 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         <button id="clear-filters" class="link-button" type="button">Clear all</button>
       </section>
 
+      <section id="quality-section" class="quality-section hidden" aria-labelledby="quality-title">
+        <div class="section-heading">
+          <h2 id="quality-title">Data quality</h2>
+          <span>Based on preview</span>
+        </div>
+        <div id="quality-warnings" class="quality-warnings"></div>
+      </section>
+
       <section class="profiles-section" aria-labelledby="profiles-title">
         <div class="section-heading">
-          <h2 id="profiles-title">Column profile</h2>
-          <span id="profiles-note"></span>
+          <div>
+            <h2 id="profiles-title">Column profile</h2>
+            <span id="profiles-note">Based on preview</span>
+          </div>
+          <div class="profile-controls">
+            <input id="profile-search" type="search" placeholder="Find a column…" aria-label="Find a profile column" autocomplete="off">
+            <button id="toggle-profiles" class="button small secondary" type="button" aria-expanded="true">Collapse</button>
+          </div>
         </div>
         <div id="profiles" class="profiles"></div>
       </section>

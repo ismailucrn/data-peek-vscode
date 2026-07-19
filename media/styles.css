@@ -236,12 +236,39 @@ input[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBor
 }
 .operation-status.error-status { border-left-color: var(--vscode-errorForeground); }
 
-.profiles-section { margin-bottom: 20px; }
+.profiles-section, .quality-section { margin-bottom: 20px; }
 .section-heading {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 8px;
   color: var(--muted);
+}
+.section-heading > div:first-child { display: grid; gap: 3px; }
+.section-heading > div:first-child > span { font-size: 11px; }
+.profile-controls { display: flex; align-items: center; gap: 7px; }
+.profile-controls input { width: min(240px, 28vw); min-height: 27px; }
+.quality-warnings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
+}
+.quality-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  border-radius: 4px;
+  padding: 7px 8px;
+  background: var(--surface-raised);
+  font-size: 11px;
+}
+.quality-icon { color: var(--vscode-editorWarning-foreground, #cca700); font-weight: 800; }
+.quality-truncatedRows, .quality-truncatedColumns, .quality-truncatedCells {
+  border-left-color: var(--vscode-errorForeground);
 }
 .profiles {
   display: grid;
@@ -260,6 +287,28 @@ input[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBor
 .profile-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 10px 0 0; font-size: 11px; }
 .profile-card dt { color: var(--muted); }
 .profile-card dd { overflow: hidden; margin: 0; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.profile-details { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 7px; }
+.profile-details summary { color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; }
+.profile-distribution { display: grid; gap: 5px; margin-top: 9px; }
+.profile-distribution > strong { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+.histogram-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(50px, 1.5fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+.histogram-row > span:first-child { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.histogram-track { height: 7px; overflow: hidden; border-radius: 2px; background: var(--vscode-editorWidget-border, var(--border)); }
+.histogram-bar { display: block; height: 100%; background: var(--vscode-charts-blue, var(--accent)); }
+.top-value-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+.top-value-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-value-row > span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
 .type { padding: 1px 6px; }
 .type-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
 .type-date { color: var(--vscode-debugTokenExpression-string, #ce9178); }
@@ -422,6 +471,8 @@ td[role='gridcell'].selected {
   .field.compact { margin-left: 0; }
   .filter-fields { align-items: stretch; flex-direction: column; }
   .filter-fields .field { min-width: 0; }
+  .profile-controls { align-items: stretch; flex-direction: column; }
+  .profile-controls input { width: 100%; }
 }
 
 @media (max-width: 1100px) {
@@ -430,7 +481,8 @@ td[role='gridcell'].selected {
 }
 
 @media (forced-colors: active) {
-  .filter-panel, .filter-chip, .filter-button.active, .columns-menu, .cell-detail {
+  .filter-panel, .filter-chip, .filter-button.active, .columns-menu, .cell-detail,
+  .quality-warning {
     border-color: CanvasText;
   }
   td[role='gridcell'].selected { outline-color: Highlight; }

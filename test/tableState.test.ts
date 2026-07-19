@@ -22,14 +22,29 @@ const dataset: DatasetPreview = {
     [null, 25, null, null]
   ],
   profiles: [
-    { name: 'name', type: 'text', missing: 1, nonNull: 3, distinct: 3 },
-    { name: 'score', type: 'number', missing: 1, nonNull: 3, distinct: 2 },
-    { name: 'joined', type: 'date', missing: 1, nonNull: 3, distinct: 3 },
-    { name: 'active', type: 'boolean', missing: 1, nonNull: 3, distinct: 2 }
+    {
+      name: 'name', type: 'text', missing: 1, nonNull: 3, distinct: 3,
+      missingRatio: 0.25, uniqueRatio: 1, topValues: []
+    },
+    {
+      name: 'score', type: 'number', missing: 1, nonNull: 3, distinct: 2,
+      missingRatio: 0.25, uniqueRatio: 2 / 3, topValues: []
+    },
+    {
+      name: 'joined', type: 'date', missing: 1, nonNull: 3, distinct: 3,
+      missingRatio: 0.25, uniqueRatio: 1, topValues: []
+    },
+    {
+      name: 'active', type: 'boolean', missing: 1, nonNull: 3, distinct: 2,
+      missingRatio: 0.25, uniqueRatio: 2 / 3, topValues: []
+    }
   ],
   previewRowCount: 4,
   totalRows: 4,
-  truncated: false
+  truncated: false,
+  truncation: { rows: false, columns: false, cells: 0 },
+  qualityWarnings: [],
+  profileScope: 'preview'
 };
 
 test('combines global search and column filters with AND semantics', () => {
@@ -227,4 +242,17 @@ test('bounds restored column layout and cell selection state', () => {
       }
     }
   );
+});
+
+test('restores bounded profile search and collapse preferences', () => {
+  const normalized = normalizeTableViewState(
+    {
+      query: '',
+      filters: [],
+      ui: { profilesCollapsed: true, profileQuery: 'x'.repeat(300) }
+    },
+    dataset
+  );
+  assert.equal(normalized.ui?.profilesCollapsed, true);
+  assert.equal(normalized.ui?.profileQuery?.length, 200);
 });
