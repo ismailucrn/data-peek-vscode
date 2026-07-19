@@ -6,3 +6,4 @@ sample-data/
 *.vsix
 .DS_Store
 pnpm-debug.log*
+AGENTS.md
