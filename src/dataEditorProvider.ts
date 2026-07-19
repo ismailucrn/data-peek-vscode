@@ -25,9 +25,10 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
     cancellationToken: vscode.CancellationToken
   ): Promise<void> {
     const mediaRoot = vscode.Uri.joinPath(this.context.extensionUri, 'media');
+    const distRoot = vscode.Uri.joinPath(this.context.extensionUri, 'dist');
     webviewPanel.webview.options = {
       enableScripts: true,
-      localResourceRoots: [mediaRoot]
+      localResourceRoots: [mediaRoot, distRoot]
     };
 
     let selectedSheet: string | undefined;
@@ -107,7 +108,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'styles.css')
     );
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js')
+      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')
     );
 
     return `<!doctype html>
@@ -157,6 +158,37 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         </label>
       </div>
 
+      <section id="filter-panel" class="filter-panel hidden" aria-labelledby="filter-title">
+        <div class="filter-panel-heading">
+          <div>
+            <span class="eyebrow">COLUMN FILTER</span>
+            <h2 id="filter-title">Filter column</h2>
+          </div>
+          <button id="filter-cancel" class="icon-button" type="button" aria-label="Close filter">×</button>
+        </div>
+        <div class="filter-fields">
+          <label class="field">
+            <span>Operator</span>
+            <select id="filter-operator"></select>
+          </label>
+          <label id="filter-value-wrap" class="field">
+            <span>Value</span>
+            <input id="filter-value" type="text" autocomplete="off" aria-describedby="filter-error">
+          </label>
+          <label id="filter-second-value-wrap" class="field hidden">
+            <span>To</span>
+            <input id="filter-second-value" type="text" autocomplete="off" aria-describedby="filter-error">
+          </label>
+          <button id="filter-apply" class="button" type="button">Apply filter</button>
+        </div>
+        <div id="filter-error" class="field-error hidden" role="alert"></div>
+      </section>
+
+      <section id="active-filters" class="active-filters hidden" aria-label="Active filters">
+        <div id="filter-chips" class="filter-chips"></div>
+        <button id="clear-filters" class="link-button" type="button">Clear all</button>
+      </section>
+
       <section class="profiles-section" aria-labelledby="profiles-title">
         <div class="section-heading">
           <h2 id="profiles-title">Column profile</h2>
@@ -171,10 +203,10 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
             <thead id="table-head"></thead>
             <tbody id="table-body"></tbody>
           </table>
-          <div id="empty" class="empty hidden">No rows match this search.</div>
+          <div id="empty" class="empty hidden">No preview rows match the active view.</div>
         </div>
         <footer class="pagination">
-          <span id="result-count"></span>
+          <span><span id="result-count"></span> <span class="preview-scope">Filters apply only to the loaded preview.</span></span>
           <div>
             <button id="previous" class="button small" type="button">Previous</button>
             <span id="page-label"></span>
