@@ -44,6 +44,12 @@ const NO_VALUE_OPERATORS = new Set<FilterOperator>([
 const MAX_QUERY_LENGTH = 2_000;
 const MAX_FILTERS = 100;
 const MAX_FILTER_VALUE_LENGTH = 2_000;
+const TEXT_COLLATOR = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base'
+});
+
+type RowPredicate = (row: SerializableCell[]) => boolean;
 
 export const EMPTY_TABLE_VIEW_STATE: TableViewState = {
   query: '',
@@ -174,37 +180,29 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
 
 export function applyTableView(dataset: DatasetPreview, state: TableViewState): IndexedRow[] {
   const query = state.query.trim().toLowerCase();
-  const rows = dataset.rows.map((row, index) => ({ row, index }));
-  const filtered = rows.filter((item) => {
-    if (
-      query &&
-      !item.row.some(
-        (value) => value !== null && String(value).toLowerCase().includes(query)
-      )
-    ) {
-      return false;
-    }
-    return state.filters.every((filter) => {
-      const type = dataset.profiles[filter.columnIndex]?.type ?? 'text';
-      return matchesFilter(item.row[filter.columnIndex] ?? null, filter, type);
-    });
-  });
+  const predicates = state.filters.map((filter) =>
+    compileFilter(filter, dataset.profiles[filter.columnIndex]?.type ?? 'text')
+  );
+  const filtered: IndexedRow[] = [];
+  for (let index = 0; index < dataset.rows.length; index += 1) {
+    const row = dataset.rows[index];
+    if (!predicates.every((predicate) => predicate(row))) continue;
+    if (query && !rowContainsQuery(row, query)) continue;
+    filtered.push({ row, index });
+  }
 
   if (!state.sort) return filtered;
   const { columnIndex, direction } = state.sort;
   const type = dataset.profiles[columnIndex]?.type ?? 'text';
-  return filtered
-    .map((item, stableIndex) => ({ item, stableIndex }))
-    .sort((left, right) => {
-      const comparison = compareCells(
-        left.item.row[columnIndex] ?? null,
-        right.item.row[columnIndex] ?? null,
-        type,
-        direction
-      );
-      return comparison || left.stableIndex - right.stableIndex;
-    })
-    .map(({ item }) => item);
+  return filtered.sort((left, right) => {
+    const comparison = compareCells(
+      left.row[columnIndex] ?? null,
+      right.row[columnIndex] ?? null,
+      type,
+      direction
+    );
+    return comparison || left.index - right.index;
+  });
 }
 
 function normalizeFilter(value: unknown): ColumnFilter | null {
@@ -236,67 +234,87 @@ function normalizeFilter(value: unknown): ColumnFilter | null {
   };
 }
 
-function matchesFilter(
-  cell: SerializableCell,
-  filter: ColumnFilter,
-  type: ColumnProfile['type']
-): boolean {
-  if (filter.operator === 'isEmpty') return cell === null;
-  if (filter.operator === 'isNotEmpty') return cell !== null;
-  if (cell === null) return false;
-  if (filter.operator === 'isTrue') return cell === true || String(cell).toLowerCase() === 'true';
+function compileFilter(filter: ColumnFilter, type: ColumnProfile['type']): RowPredicate {
+  const { columnIndex, operator } = filter;
+  if (operator === 'isEmpty') return (row) => (row[columnIndex] ?? null) === null;
+  if (operator === 'isNotEmpty') return (row) => (row[columnIndex] ?? null) !== null;
+  if (operator === 'isTrue') {
+    return (row) => {
+      const cell = row[columnIndex] ?? null;
+      return cell !== null && (cell === true || String(cell).toLowerCase() === 'true');
+    };
+  }
   if (filter.operator === 'isFalse') {
-    return cell === false || String(cell).toLowerCase() === 'false';
+    return (row) => {
+      const cell = row[columnIndex] ?? null;
+      return cell !== null && (cell === false || String(cell).toLowerCase() === 'false');
+    };
   }
 
   if (type === 'number' || type === 'date') {
-    const left = type === 'number' ? Number(cell) : Date.parse(String(cell));
-    const right = type === 'number' ? Number(filter.value) : Date.parse(filter.value ?? '');
-    const upper =
-      type === 'number' ? Number(filter.secondValue) : Date.parse(filter.secondValue ?? '');
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
-    switch (filter.operator) {
+    const parse =
+      type === 'number'
+        ? (value: SerializableCell | undefined): number => Number(value)
+        : (value: SerializableCell | undefined): number => Date.parse(String(value));
+    const right = parse(filter.value);
+    const upper = operator === 'between' ? parse(filter.secondValue) : Number.NaN;
+    const minimum = Math.min(right, upper);
+    const maximum = Math.max(right, upper);
+    return (row) => {
+      const cell = row[columnIndex] ?? null;
+      if (cell === null) return false;
+      const left = parse(cell);
+      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      switch (operator) {
+        case 'equals':
+          return left === right;
+        case 'notEquals':
+          return left !== right;
+        case 'greaterThan':
+          return left > right;
+        case 'greaterThanOrEqual':
+          return left >= right;
+        case 'lessThan':
+          return left < right;
+        case 'lessThanOrEqual':
+          return left <= right;
+        case 'between':
+          return Number.isFinite(upper) && left >= minimum && left <= maximum;
+        default:
+          return false;
+      }
+    };
+  }
+
+  const right = (filter.value ?? '').toLowerCase();
+  return (row) => {
+    const cell = row[columnIndex] ?? null;
+    if (cell === null) return false;
+    const left = String(cell).toLowerCase();
+    switch (operator) {
+      case 'contains':
+        return left.includes(right);
+      case 'notContains':
+        return !left.includes(right);
       case 'equals':
         return left === right;
       case 'notEquals':
         return left !== right;
-      case 'greaterThan':
-        return left > right;
-      case 'greaterThanOrEqual':
-        return left >= right;
-      case 'lessThan':
-        return left < right;
-      case 'lessThanOrEqual':
-        return left <= right;
-      case 'between': {
-        if (!Number.isFinite(upper)) return false;
-        const minimum = Math.min(right, upper);
-        const maximum = Math.max(right, upper);
-        return left >= minimum && left <= maximum;
-      }
+      case 'startsWith':
+        return left.startsWith(right);
+      case 'endsWith':
+        return left.endsWith(right);
       default:
         return false;
     }
-  }
+  };
+}
 
-  const left = String(cell).toLowerCase();
-  const right = (filter.value ?? '').toLowerCase();
-  switch (filter.operator) {
-    case 'contains':
-      return left.includes(right);
-    case 'notContains':
-      return !left.includes(right);
-    case 'equals':
-      return left === right;
-    case 'notEquals':
-      return left !== right;
-    case 'startsWith':
-      return left.startsWith(right);
-    case 'endsWith':
-      return left.endsWith(right);
-    default:
-      return false;
+function rowContainsQuery(row: SerializableCell[], query: string): boolean {
+  for (const value of row) {
+    if (value !== null && String(value).toLowerCase().includes(query)) return true;
   }
+  return false;
 }
 
 function compareCells(
@@ -318,16 +336,10 @@ function compareCells(
     comparison = Number(left === true || String(left).toLowerCase() === 'true') -
       Number(right === true || String(right).toLowerCase() === 'true');
   } else {
-    comparison = String(left).localeCompare(String(right), 'en', {
-      numeric: true,
-      sensitivity: 'base'
-    });
+    comparison = TEXT_COLLATOR.compare(String(left), String(right));
   }
   if (!Number.isFinite(comparison)) {
-    comparison = String(left).localeCompare(String(right), 'en', {
-      numeric: true,
-      sensitivity: 'base'
-    });
+    comparison = TEXT_COLLATOR.compare(String(left), String(right));
   }
   return direction === 'asc' ? comparison : -comparison;
 }

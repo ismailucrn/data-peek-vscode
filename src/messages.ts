@@ -1,37 +1,93 @@
 import { WebviewToHostMessage } from './types';
 
 export function isWebviewMessage(value: unknown): value is WebviewToHostMessage {
-  if (!value || typeof value !== 'object') return false;
-  const message = value as Record<string, unknown>;
-  if (message.type === 'ready' || message.type === 'reload') return true;
+  if (!isRecord(value)) return false;
+  const message = value;
+  if (message.type === 'ready' || message.type === 'reload') {
+    return hasKeys(message, ['type']);
+  }
   if (message.type === 'selectSheet') {
-    return typeof message.sheet === 'string' && message.sheet.length <= 128;
+    return (
+      hasKeys(message, ['type', 'sheet']) &&
+      typeof message.sheet === 'string' &&
+      message.sheet.length > 0 &&
+      message.sheet.length <= 128
+    );
   }
   if (message.type === 'updateParsing') {
+    if (!hasKeys(message, ['type', 'settings'])) return false;
     if (message.settings === null) return true;
-    if (!message.settings || typeof message.settings !== 'object' || Array.isArray(message.settings)) {
-      return false;
-    }
-    const settings = message.settings as Record<string, unknown>;
-    return (
-      (!Array.isArray(settings.nullTokens) || settings.nullTokens.length <= 21) &&
-      (!Array.isArray(settings.nullTokens) ||
-        settings.nullTokens.every((token) => typeof token === 'string' && token.length <= 65)) &&
-      Object.values(settings).every(
-        (item) => typeof item !== 'string' || item.length <= 128
-      )
-    );
+    return isBoundedParsingSettings(message.settings);
   }
   return (
     message.type === 'copy' &&
+    hasKeys(message, ['type', 'kind', 'rowIndex', 'columnIndex']) &&
     (message.kind === 'cell' || message.kind === 'row' || message.kind === 'columnName') &&
-    typeof message.rowIndex === 'number' &&
     Number.isInteger(message.rowIndex) &&
-    message.rowIndex >= 0 &&
-    message.rowIndex < 5_000 &&
-    typeof message.columnIndex === 'number' &&
+    (message.rowIndex as number) >= 0 &&
+    (message.rowIndex as number) < 5_000 &&
     Number.isInteger(message.columnIndex) &&
-    message.columnIndex >= 0 &&
-    message.columnIndex < 2_000
+    (message.columnIndex as number) >= 0 &&
+    (message.columnIndex as number) < 2_000
+  );
+}
+
+function isBoundedParsingSettings(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (
+    !hasKeys(
+      value,
+      [
+        'delimiter',
+        'encoding',
+        'header',
+        'skipRows',
+        'quote',
+        'escape',
+        'nullTokens',
+        'decimalSeparator',
+        'thousandsSeparator'
+      ],
+      ['customDelimiter']
+    ) ||
+    typeof value.delimiter !== 'string' ||
+    value.delimiter.length > 16 ||
+    (value.customDelimiter !== undefined &&
+      (typeof value.customDelimiter !== 'string' || value.customDelimiter.length > 2)) ||
+    typeof value.encoding !== 'string' ||
+    value.encoding.length > 16 ||
+    typeof value.header !== 'string' ||
+    value.header.length > 32 ||
+    !Number.isInteger(value.skipRows) ||
+    typeof value.quote !== 'string' ||
+    value.quote.length > 2 ||
+    typeof value.escape !== 'string' ||
+    value.escape.length > 2 ||
+    !Array.isArray(value.nullTokens) ||
+    value.nullTokens.length > 20 ||
+    !value.nullTokens.every((token) => typeof token === 'string' && token.length <= 64) ||
+    typeof value.decimalSeparator !== 'string' ||
+    value.decimalSeparator.length > 16 ||
+    typeof value.thousandsSeparator !== 'string' ||
+    value.thousandsSeparator.length > 16
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = []
+): boolean {
+  const allowedKeys = new Set([...required, ...optional]);
+  return (
+    required.every((key) => Object.prototype.hasOwnProperty.call(value, key)) &&
+    Object.keys(value).every((key) => allowedKeys.has(key))
   );
 }

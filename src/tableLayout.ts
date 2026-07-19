@@ -83,38 +83,37 @@ export function calculateVirtualColumns(
   viewportSize: number,
   overscan = VIRTUAL_OVERSCAN
 ): VirtualColumnRange {
-  const total = widths.reduce((sum, width) => sum + Math.max(0, width), 0);
-  if (!widths.length) return { start: 0, end: 0, before: 0, after: 0, total };
+  if (!widths.length) return { start: 0, end: 0, before: 0, after: 0, total: 0 };
 
   const safeStart = Math.max(0, viewportStart);
   const safeEnd = safeStart + Math.max(0, viewportSize);
   let offset = 0;
   let firstVisible = widths.length - 1;
   let endVisible = widths.length;
+  let foundFirst = false;
   for (let index = 0; index < widths.length; index += 1) {
-    const nextOffset = offset + Math.max(0, widths[index]);
-    if (nextOffset > safeStart) {
+    const width = Math.max(0, widths[index]);
+    const nextOffset = offset + width;
+    if (!foundFirst && nextOffset > safeStart) {
       firstVisible = index;
-      break;
+      foundFirst = true;
+    }
+    if (endVisible === widths.length && offset >= safeEnd) {
+      endVisible = index;
     }
     offset = nextOffset;
-  }
-  offset = 0;
-  for (let index = 0; index < widths.length; index += 1) {
-    if (offset >= safeEnd) {
-      endVisible = index;
-      break;
-    }
-    offset += Math.max(0, widths[index]);
   }
 
   const start = Math.max(0, firstVisible - Math.max(0, overscan));
   const end = Math.min(widths.length, endVisible + Math.max(0, overscan));
-  const before = widths.slice(0, start).reduce((sum, width) => sum + Math.max(0, width), 0);
-  const rendered = widths
-    .slice(start, end)
-    .reduce((sum, width) => sum + Math.max(0, width), 0);
-  return { start, end, before, after: Math.max(0, total - before - rendered), total };
+  let before = 0;
+  let rendered = 0;
+  for (let index = 0; index < end; index += 1) {
+    const width = Math.max(0, widths[index]);
+    if (index < start) before += width;
+    else rendered += width;
+  }
+  return { start, end, before, after: Math.max(0, offset - before - rendered), total: offset };
 }
 
 export function navigateSelection(
