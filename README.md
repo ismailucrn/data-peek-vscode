@@ -1,49 +1,78 @@
 # Data Peek for VS Code
 
-Data Peek opens CSV, TSV, Parquet and modern Excel workbooks in an interactive, read-only VS Code tab. It is designed for analysts and data scientists who want to inspect a file without first writing Pandas or notebook code.
+Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TSV, Parquet, and Excel files in VS Code. It lets you review a file's structure, sample rows, and basic quality signals without writing Pandas or notebook code.
 
-## Current MVP
+## Features
 
-- Right-click a supported file in Explorer and select **Open with Data Peek**.
-- Preview `.csv`, `.tsv`, `.parquet`, `.xlsx` and `.xlsm` files.
-- Search across the loaded preview and combine type-aware column filters with `AND` logic.
-- Sort by any column and continuously scroll through a two-axis virtualized table.
-- Resize, hide and pin columns; layout preferences stay with the open editor panel.
-- Navigate cells by keyboard and inspect or copy the complete selected value safely.
-- Inspect searchable preview-based profiles with missing/unique ratios, distributions, top values and data-quality warnings.
-- Reparse CSV and TSV previews with session-only delimiter, encoding, header, quote, null-token and locale-number settings.
+- Open `.csv`, `.tsv`, `.parquet`, `.xlsx`, and `.xlsm` files.
+- Use **Open with Data Peek** from the Explorer or editor-title context menu.
+- Search the loaded preview and combine multiple type-aware column filters.
+- Sort columns and scroll large tables with two-axis virtualization.
+- Resize, hide, and pin columns.
+- Navigate cells with the keyboard and inspect the complete selected value.
+- Copy a cell, row, or column name to the clipboard.
+- View preview profiles for numeric, boolean, date, text, mixed, and empty columns.
+- Review missing and unique ratios, distributions, top values, and data-quality warnings.
 - Switch between worksheets in an Excel workbook.
-- Respect VS Code light, dark and high-contrast themes.
+- Adjust session-only parsing settings for CSV and TSV files.
+- Use the editor in VS Code light, dark, and high-contrast themes.
 
-The editor is intentionally read-only. CSV and Parquet readers limit work to the preview where possible. Excel workbooks are loaded into memory and are protected by the `dataPeek.maxExcelFileSizeMB` setting.
+The editor never changes or writes back to the source file. CSV/TSV and Parquet readers operate within preview limits; Excel workbooks are loaded in memory and protected by file-size and expanded-ZIP limits.
 
-Untrusted data is rendered with DOM `textContent` under a restrictive Content Security Policy. Wide datasets, oversized cells, expanded Excel ZIP content, and Parquet preview decompression are bounded to protect the VS Code extension host from accidental or malicious resource exhaustion.
+## Safety and limits
 
-## Run locally
+Data Peek treats files as untrusted input. Preview rows, columns, total cells, cell size, and expanded Parquet data are bounded. Excel archives pass ZIP safety checks before ExcelJS loads them. File values are never interpreted as HTML; they are rendered through safe DOM text nodes.
 
-1. Install dependencies with `pnpm install`.
-2. Build with `pnpm run package`.
-3. Open this folder in VS Code and press `F5` to launch an Extension Development Host.
-4. In the development host, right-click a supported data file and choose **Open with Data Peek**.
+Previews and profiles are calculated only from loaded rows. When row or column limits are reached, the editor indicates truncation and shows the relevant quality warnings.
 
-During development, use `pnpm run watch` and keep the Extension Development Host open.
+## Usage
+
+1. Right-click a supported file in VS Code.
+2. Select **Open with Data Peek**.
+3. Search, filter, sort, or adjust the column layout in the preview.
+4. Copy the selected cell, row, or column name when needed.
 
 ## Settings
 
-- `dataPeek.previewRows`: maximum rows placed in an interactive preview (default `2000`, maximum `5000`).
-- `dataPeek.maxExcelFileSizeMB`: Excel workbook memory safety limit (default `100`).
-- `dataPeek.maxExcelExpandedSizeMB`: uncompressed Excel ZIP safety limit (default `250`).
-- `dataPeek.maxColumns`: maximum columns loaded into a preview (default `500`).
+| Setting | Default | Range | Description |
+| --- | ---: | ---: | --- |
+| `dataPeek.previewRows` | `2000` | `100–5000` | Maximum data rows loaded into the interactive preview |
+| `dataPeek.maxColumns` | `500` | `10–2000` | Maximum columns loaded into the preview |
+| `dataPeek.maxExcelFileSizeMB` | `100` | `1–1000` | Maximum Excel workbook size that may be loaded into memory |
+| `dataPeek.maxExcelExpandedSizeMB` | `250` | `10–2000` | Maximum allowed uncompressed size of an Excel ZIP archive |
 
 ## CSV and TSV parsing
 
-CSV and TSV editors expose parsing controls for automatic or explicit delimiters, UTF-8/UTF-16LE/Latin-1 encoding, headerless data, skipped leading rows, quote and escape characters, null tokens, and decimal/thousands separators. Applying an option safely reloads only the bounded preview. These choices remain in the open editor session and are not carried to other files.
+CSV and TSV previews support the following settings:
 
-## Near-term focus
+- Automatic, comma, semicolon, tab, pipe, or custom delimiters
+- UTF-8, UTF-16LE, or Latin-1 encoding
+- Use the first non-empty row as headers, or load headerless data
+- Number of leading rows to skip
+- Quote and escape characters
+- Tokens that should be treated as null
+- Localized number formats with decimal and thousands separators
 
-- Keep preview processing responsive at the configured row, column and cell limits.
-- Expand malformed and adversarial fixture coverage for every supported format.
-- Complete accessibility, cross-platform and clean-profile smoke testing.
+Settings apply only to the open editor session; they are not written to the source file or carried to other files.
+
+## Development
+
+Requirements: Node.js and pnpm.
+
+```sh
+pnpm install
+pnpm run check
+pnpm test
+pnpm run package
+```
+
+To start a local Extension Development Host:
+
+```sh
+pnpm run watch
+```
+
+Then open the project in VS Code, press `F5`, and select a supported file in the launched development window.
 
 ## License
 
