@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload VSIX
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: data-peek-vsix
           path: "*.vsix"
