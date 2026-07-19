@@ -3,6 +3,11 @@ dist/
 .test-dist/
 .pnpm-store/
 sample-data/
+*.csv
+*.tsv
+*.parquet
+*.xlsx
+*.xlsm
 *.vsix
 .DS_Store
 pnpm-debug.log*
