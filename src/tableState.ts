@@ -149,14 +149,26 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
     dataset.rows.length,
     dataset.columns.length
   );
+  const profilesCollapsed =
+    typeof rawUi?.profilesCollapsed === 'boolean' ? rawUi.profilesCollapsed : undefined;
+  const profileQuery =
+    typeof rawUi?.profileQuery === 'string' ? rawUi.profileQuery.slice(0, 200) : undefined;
   const ui =
-    pageSize || columnWidths || hiddenColumns.length || pinnedColumns.length || selectedCell
+    pageSize ||
+    columnWidths ||
+    hiddenColumns.length ||
+    pinnedColumns.length ||
+    selectedCell ||
+    profilesCollapsed !== undefined ||
+    profileQuery
       ? {
           ...(pageSize ? { pageSize } : {}),
           ...(columnWidths ? { columnWidths } : {}),
           ...(hiddenColumns.length ? { hiddenColumns } : {}),
           ...(pinnedColumns.length ? { pinnedColumns } : {}),
-          ...(selectedCell ? { selectedCell } : {})
+          ...(selectedCell ? { selectedCell } : {}),
+          ...(profilesCollapsed !== undefined ? { profilesCollapsed } : {}),
+          ...(profileQuery ? { profileQuery } : {})
         }
       : undefined;
   return {

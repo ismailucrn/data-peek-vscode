@@ -2,7 +2,7 @@
   "name": "data-peek",
   "displayName": "Data Peek",
   "description": "Inspect CSV, Parquet and Excel files directly in VS Code without writing code.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "local-data-tools",
   "license": "MIT",
   "packageManager": "pnpm@10.34.5",

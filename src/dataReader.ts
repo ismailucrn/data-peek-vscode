@@ -2,8 +2,9 @@ import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'csv-parse';
 import ExcelJS from 'exceljs';
+import { buildQualityWarnings } from './dataQuality';
 import { validateExcelArchive } from './excelArchive';
-import { buildProfiles, normalizeCell } from './profile';
+import { buildProfiles, isTruncatedCell, normalizeCell } from './profile';
 import { DatasetPreview, PreviewOptions, SerializableCell } from './types';
 
 const SUPPORTED_EXTENSIONS = new Set(['.csv', '.tsv', '.parquet', '.xlsx', '.xlsm']);
@@ -251,13 +252,13 @@ function excelCellValue(cell: ExcelJS.Cell): SerializableCell {
       return normalizeCell(value.result);
     }
     if ('richText' in value && Array.isArray(value.richText)) {
-      return value.richText.map((part) => part.text).join('');
+      return normalizeCell(value.richText.map((part) => part.text).join(''));
     }
     if ('text' in value && typeof value.text === 'string') {
-      return value.text;
+      return normalizeCell(value.text);
     }
     if ('error' in value && typeof value.error === 'string') {
-      return value.error;
+      return normalizeCell(value.error);
     }
   }
   return normalizeCell(value);
@@ -334,18 +335,31 @@ function makePreview(input: {
   sheet?: string;
   sheets?: string[];
 }): DatasetPreview {
+  const profiles = buildProfiles(input.columns, input.rows);
+  const totalColumns = input.totalColumns ?? input.columns.length;
+  const truncation = {
+    rows: input.truncated,
+    columns: totalColumns > input.columns.length,
+    cells: input.rows.reduce(
+      (count, row) => count + row.filter((value) => isTruncatedCell(value)).length,
+      0
+    )
+  };
   return {
     fileName: path.basename(input.filePath),
     format: input.format,
     fileSize: input.fileSize,
     columns: input.columns,
-    totalColumns: input.totalColumns ?? input.columns.length,
-    truncatedColumns: (input.totalColumns ?? input.columns.length) > input.columns.length,
+    totalColumns,
+    truncatedColumns: truncation.columns,
     rows: input.rows,
-    profiles: buildProfiles(input.columns, input.rows),
+    profiles,
     previewRowCount: input.rows.length,
     totalRows: input.totalRows,
     truncated: input.truncated,
+    truncation,
+    qualityWarnings: buildQualityWarnings(profiles, input.rows, truncation),
+    profileScope: 'preview',
     sheet: input.sheet,
     sheets: input.sheets
   };

@@ -74,8 +74,12 @@ const elements = {
   columnsList: requiredElement<HTMLElement>('columns-list'),
   showAllColumns: requiredElement<HTMLButtonElement>('show-all-columns'),
   operationStatus: requiredElement<HTMLElement>('operation-status'),
+  qualitySection: requiredElement<HTMLElement>('quality-section'),
+  qualityWarnings: requiredElement<HTMLElement>('quality-warnings'),
   profiles: requiredElement<HTMLElement>('profiles'),
   profilesNote: requiredElement<HTMLElement>('profiles-note'),
+  profileSearch: requiredElement<HTMLInputElement>('profile-search'),
+  toggleProfiles: requiredElement<HTMLButtonElement>('toggle-profiles'),
   tableHead: requiredElement<HTMLElement>('table-head'),
   tableBody: requiredElement<HTMLElement>('table-body'),
   tableColumns: requiredElement<HTMLElement>('table-columns'),
@@ -157,6 +161,14 @@ elements.showAllColumns.addEventListener('click', () => {
 elements.copyCell.addEventListener('click', () => requestCopy('cell'));
 elements.copyRow.addEventListener('click', () => requestCopy('row'));
 elements.copyColumnName.addEventListener('click', () => requestCopy('columnName'));
+elements.profileSearch.addEventListener('input', () => {
+  updateUi({ profileQuery: elements.profileSearch.value.slice(0, 200) });
+  renderProfiles();
+});
+elements.toggleProfiles.addEventListener('click', () => {
+  updateUi({ profilesCollapsed: !tableState.ui?.profilesCollapsed });
+  renderProfiles();
+});
 elements.filterOperator.addEventListener('change', renderFilterValueFields);
 elements.filterApply.addEventListener('click', applyFilter);
 elements.filterCancel.addEventListener('click', closeFilterPanel);
@@ -213,6 +225,7 @@ function receiveDataset(nextDataset: DatasetPreview): void {
   activeFilterColumn = null;
   elements.search.value = tableState.query;
   elements.pageSize.value = String(tableState.ui?.pageSize ?? 50);
+  elements.profileSearch.value = tableState.ui?.profileQuery ?? '';
   closeFilterPanel();
   persistState();
   renderDataset();
@@ -227,6 +240,7 @@ function renderDataset(): void {
   renderMetadata();
   renderSheetPicker();
   renderColumnsMenu();
+  renderQualityWarnings();
   renderProfiles();
   renderTable();
 }
@@ -272,9 +286,16 @@ function renderSheetPicker(): void {
 function renderProfiles(): void {
   if (!dataset) return;
   elements.profiles.replaceChildren();
-  const visibleProfiles = dataset.profiles.slice(0, 12);
-  elements.profilesNote.textContent =
-    dataset.profiles.length > 12 ? `Showing 12 of ${dataset.profiles.length}` : '';
+  const collapsed = tableState.ui?.profilesCollapsed ?? false;
+  const query = (tableState.ui?.profileQuery ?? '').trim().toLowerCase();
+  const visibleProfiles = dataset.profiles.filter((profile) =>
+    profile.name.toLowerCase().includes(query)
+  );
+  elements.profiles.classList.toggle('hidden', collapsed);
+  elements.toggleProfiles.textContent = collapsed ? 'Expand' : 'Collapse';
+  elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
+  elements.profilesNote.textContent = `Based on preview · ${visibleProfiles.length} of ${dataset.profiles.length}`;
+  if (collapsed) return;
   for (const profile of visibleProfiles) {
     const card = document.createElement('article');
     card.className = 'profile-card';
@@ -293,12 +314,105 @@ function renderProfiles(): void {
     addStat(stats, 'Non-null', formatNumber(profile.nonNull));
     addStat(stats, 'Missing', formatNumber(profile.missing));
     addStat(stats, 'Distinct', formatNumber(profile.distinct));
+    addStat(stats, 'Missing %', formatPercent(profile.missingRatio));
+    addStat(stats, 'Unique %', formatPercent(profile.uniqueRatio));
     if (profile.mean !== undefined) addStat(stats, 'Mean', formatCompact(profile.mean));
+    if (profile.median !== undefined) addStat(stats, 'Median', formatCompact(profile.median));
+    if (profile.standardDeviation !== undefined) {
+      addStat(stats, 'Population σ', formatCompact(profile.standardDeviation));
+    }
     if (profile.min !== undefined) addStat(stats, 'Min', formatCompact(profile.min));
     if (profile.max !== undefined) addStat(stats, 'Max', formatCompact(profile.max));
+    if (profile.minLength !== undefined) addStat(stats, 'Min length', formatNumber(profile.minLength));
+    if (profile.maxLength !== undefined) addStat(stats, 'Max length', formatNumber(profile.maxLength));
     card.appendChild(stats);
+
+    if ((profile.histogram?.length ?? 0) > 0 || profile.topValues.length > 0) {
+      const details = document.createElement('details');
+      details.className = 'profile-details';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Distribution details';
+      details.appendChild(summary);
+      if (profile.histogram?.length) renderHistogram(details, profile.histogram);
+      if (profile.topValues.length) renderTopValues(details, profile.topValues);
+      card.appendChild(details);
+    }
     elements.profiles.appendChild(card);
   }
+}
+
+function renderQualityWarnings(): void {
+  if (!dataset) return;
+  elements.qualityWarnings.replaceChildren();
+  for (const warning of dataset.qualityWarnings) {
+    const item = document.createElement('div');
+    item.className = `quality-warning quality-${warning.code}`;
+    const icon = document.createElement('span');
+    icon.className = 'quality-icon';
+    icon.textContent = warning.code.startsWith('truncated') ? '!' : '•';
+    icon.setAttribute('aria-hidden', 'true');
+    const message = document.createElement('span');
+    message.textContent = warning.message;
+    item.append(icon, message);
+    elements.qualityWarnings.appendChild(item);
+  }
+  elements.qualitySection.classList.toggle('hidden', dataset.qualityWarnings.length === 0);
+}
+
+function renderHistogram(
+  container: HTMLElement,
+  bins: NonNullable<DatasetPreview['profiles'][number]['histogram']>
+): void {
+  const section = document.createElement('section');
+  section.className = 'profile-distribution';
+  const heading = document.createElement('strong');
+  heading.textContent = 'Histogram';
+  section.appendChild(heading);
+  const maximum = Math.max(...bins.map((bin) => bin.count), 1);
+  for (const bin of bins) {
+    const row = document.createElement('div');
+    row.className = 'histogram-row';
+    const label = document.createElement('span');
+    label.textContent =
+      bin.start === bin.end
+        ? formatCompact(bin.start)
+        : `${formatCompact(bin.start)}–${formatCompact(bin.end)}`;
+    label.title = label.textContent;
+    const track = document.createElement('span');
+    track.className = 'histogram-track';
+    const bar = document.createElement('span');
+    bar.className = 'histogram-bar';
+    bar.style.width = `${(bin.count / maximum) * 100}%`;
+    track.appendChild(bar);
+    const count = document.createElement('span');
+    count.textContent = formatNumber(bin.count);
+    row.append(label, track, count);
+    section.appendChild(row);
+  }
+  container.appendChild(section);
+}
+
+function renderTopValues(
+  container: HTMLElement,
+  values: DatasetPreview['profiles'][number]['topValues']
+): void {
+  const section = document.createElement('section');
+  section.className = 'profile-distribution';
+  const heading = document.createElement('strong');
+  heading.textContent = 'Top values';
+  section.appendChild(heading);
+  for (const item of values) {
+    const row = document.createElement('div');
+    row.className = 'top-value-row';
+    const value = document.createElement('span');
+    value.textContent = item.value === null ? 'null' : String(item.value);
+    value.title = value.textContent;
+    const count = document.createElement('span');
+    count.textContent = formatNumber(item.count);
+    row.append(value, count);
+    section.appendChild(row);
+  }
+  container.appendChild(section);
 }
 
 function addStat(list: HTMLElement, label: string, value: string): void {
@@ -894,6 +1008,13 @@ function formatCompact(value: string | number): string {
   return typeof value === 'number'
     ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value)
     : String(value);
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: 'percent',
+    maximumFractionDigits: 1
+  }).format(value);
 }
 
 function formatBytes(bytes: number): string {

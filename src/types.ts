@@ -45,6 +45,8 @@ export interface TableViewState {
     hiddenColumns?: number[];
     pinnedColumns?: number[];
     selectedCell?: CellSelection;
+    profilesCollapsed?: boolean;
+    profileQuery?: string;
   };
 }
 
@@ -62,6 +64,45 @@ export interface ColumnProfile {
   min?: string | number;
   max?: string | number;
   mean?: number;
+  median?: number;
+  standardDeviation?: number;
+  missingRatio: number;
+  uniqueRatio: number;
+  minLength?: number;
+  maxLength?: number;
+  histogram?: Array<{
+    start: number;
+    end: number;
+    count: number;
+  }>;
+  topValues: Array<{
+    value: SerializableCell;
+    count: number;
+  }>;
+}
+
+export type QualityWarningCode =
+  | 'mixedType'
+  | 'allEmpty'
+  | 'constant'
+  | 'highMissing'
+  | 'possibleIdentifier'
+  | 'duplicateRows'
+  | 'truncatedRows'
+  | 'truncatedColumns'
+  | 'truncatedCells';
+
+export interface QualityWarning {
+  code: QualityWarningCode;
+  message: string;
+  columnIndex?: number;
+  count?: number;
+}
+
+export interface TruncationInfo {
+  rows: boolean;
+  columns: boolean;
+  cells: number;
 }
 
 export interface DatasetPreview {
@@ -76,6 +117,9 @@ export interface DatasetPreview {
   previewRowCount: number;
   totalRows: number | null;
   truncated: boolean;
+  truncation: TruncationInfo;
+  qualityWarnings: QualityWarning[];
+  profileScope: 'preview';
   sheet?: string;
   sheets?: string[];
 }

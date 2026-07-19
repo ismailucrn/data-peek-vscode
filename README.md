@@ -10,7 +10,7 @@ Data Peek opens CSV, TSV, Parquet and modern Excel workbooks in an interactive, 
 - Sort by any column and page through rows.
 - Resize, hide and pin columns; layout preferences stay with the open editor panel.
 - Navigate cells by keyboard and inspect or copy the complete selected value safely.
-- Inspect inferred column types, missing values, distinct counts and basic ranges.
+- Inspect searchable preview-based profiles with missing/unique ratios, distributions, top values and data-quality warnings.
 - Switch between worksheets in an Excel workbook.
 - Respect VS Code light, dark and high-contrast themes.
 
@@ -39,7 +39,6 @@ During development, use `pnpm run watch` and keep the Extension Development Host
 - Configurable CSV and TSV parsing options.
 - Virtualized rendering for larger previews.
 - Exporting filtered data and generated Pandas/Polars code.
-- Richer distributions, histograms and data quality warnings.
 - Optional editable transformations with an explicit save/export flow.
 
 ## License

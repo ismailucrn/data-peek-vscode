@@ -36,6 +36,11 @@ test('caps wide CSV previews and reports the source column count', async () => {
     assert.equal(preview.columns.length, 10);
     assert.equal(preview.totalColumns, 12);
     assert.equal(preview.truncatedColumns, true);
+    assert.equal(preview.truncation.columns, true);
+    assert.equal(
+      preview.qualityWarnings.some((warning) => warning.code === 'truncatedColumns'),
+      true
+    );
     assert.equal(preview.rows[0].length, 10);
   });
 });
@@ -54,8 +59,27 @@ test('reads a quoted CSV preview and reports truncation', async () => {
     assert.equal(preview.rows.length, 100);
     assert.equal(preview.rows[0][0], 'Person, 0');
     assert.equal(preview.truncated, true);
+    assert.equal(preview.truncation.rows, true);
     assert.equal(preview.totalRows, null);
     assert.equal(preview.profiles[1].type, 'number');
+  });
+});
+
+test('reports cells shortened by the normalization safety limit', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'long-cell.csv');
+    await fs.writeFile(filePath, `value\n${'x'.repeat(100_001)}\n`, 'utf8');
+
+    const preview = await loadPreview(filePath, options);
+    assert.equal((preview.rows[0][0] as string).length, 100_000);
+    assert.equal(preview.truncation.cells, 1);
+    assert.equal(
+      preview.qualityWarnings.some(
+        (warning) => warning.code === 'truncatedCells' && warning.count === 1
+      ),
+      true
+    );
+    assert.equal(preview.profileScope, 'preview');
   });
 });
 

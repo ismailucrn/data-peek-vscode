@@ -4,6 +4,14 @@ All notable changes to Data Peek are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-19
+
+### Added
+
+- Preview-based missing/unique ratios, median, population standard deviation, histograms, text lengths, date ranges, and top values.
+- Data-quality warnings for mixed, empty, constant, highly missing, identifier-like, duplicate, and truncated preview data.
+- Searchable, collapsible profiles for every loaded column with dependency-free distribution details.
+
 ## [0.3.0] - 2026-07-19
 
 ### Added
@@ -35,6 +43,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Search, sorting, pagination, worksheet selection, and bounded column profiles.
 - Safety limits for wide data, large cells, Excel archives, and Parquet previews.
 
+[0.4.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.1.0...v0.1.1
