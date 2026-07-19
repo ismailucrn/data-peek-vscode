@@ -68,6 +68,14 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   isEmpty: 'Is empty',
   isNotEmpty: 'Is not empty'
 };
+const NUMBER_FORMATTER = new Intl.NumberFormat();
+const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 3
+});
+const PERCENT_FORMATTER = new Intl.NumberFormat(undefined, {
+  style: 'percent',
+  maximumFractionDigits: 1
+});
 
 const vscode = acquireVsCodeApi<PersistedState>();
 const elements = {
@@ -145,10 +153,15 @@ let statusTimer = 0;
 let scrollFrame = 0;
 let resizeFrame = 0;
 let virtualRows: IndexedRow[] = [];
+let virtualRowIndexes: number[] = [];
+let virtualColumnOrder: number[] = [];
 let virtualPinnedColumns: number[] = [];
 let virtualScrollingColumns: number[] = [];
+let virtualScrollingWidths: number[] = [];
+let virtualPinnedWidth = 54;
 let renderedRows: VirtualRange = { start: -1, end: -1 };
 let renderedColumns = '';
+let currentDatasetSignature = '';
 
 elements.reload.addEventListener('click', () => vscode.postMessage({ type: 'reload' }));
 elements.parsingDelimiter.addEventListener('change', renderCustomDelimiterField);
@@ -266,6 +279,7 @@ function setError(message: string): void {
 function receiveDataset(nextDataset: DatasetPreview): void {
   dataset = nextDataset;
   const signature = datasetSignature(nextDataset);
+  currentDatasetSignature = signature;
   const persisted = vscode.getState();
   tableState =
     persisted?.datasetSignature === signature
@@ -484,6 +498,7 @@ function renderProfiles(): void {
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
   elements.profilesNote.textContent = `Based on preview · ${visibleProfiles.length} of ${dataset.profiles.length}`;
   if (collapsed) return;
+  const fragment = document.createDocumentFragment();
   for (const profile of visibleProfiles) {
     const card = document.createElement('article');
     card.className = 'profile-card';
@@ -521,17 +536,24 @@ function renderProfiles(): void {
       const summary = document.createElement('summary');
       summary.textContent = 'Distribution details';
       details.appendChild(summary);
-      if (profile.histogram?.length) renderHistogram(details, profile.histogram);
-      if (profile.topValues.length) renderTopValues(details, profile.topValues);
+      let detailsRendered = false;
+      details.addEventListener('toggle', () => {
+        if (!details.open || detailsRendered) return;
+        detailsRendered = true;
+        if (profile.histogram?.length) renderHistogram(details, profile.histogram);
+        if (profile.topValues.length) renderTopValues(details, profile.topValues);
+      });
       card.appendChild(details);
     }
-    elements.profiles.appendChild(card);
+    fragment.appendChild(card);
   }
+  elements.profiles.appendChild(fragment);
 }
 
 function renderQualityWarnings(): void {
   if (!dataset) return;
   elements.qualityWarnings.replaceChildren();
+  const fragment = document.createDocumentFragment();
   for (const warning of dataset.qualityWarnings) {
     const item = document.createElement('div');
     item.className = `quality-warning quality-${warning.code}`;
@@ -542,8 +564,9 @@ function renderQualityWarnings(): void {
     const message = document.createElement('span');
     message.textContent = warning.message;
     item.append(icon, message);
-    elements.qualityWarnings.appendChild(item);
+    fragment.appendChild(item);
   }
+  elements.qualityWarnings.appendChild(fragment);
   elements.qualitySection.classList.toggle('hidden', dataset.qualityWarnings.length === 0);
 }
 
@@ -615,16 +638,19 @@ function addStat(list: HTMLElement, label: string, value: string): void {
 function renderTable(): void {
   if (!dataset) return;
   virtualRows = applyTableView(dataset, tableState);
-  const columnOrder = currentColumnOrder();
+  virtualRowIndexes = virtualRows.map((item) => item.index);
+  virtualColumnOrder = currentColumnOrder();
   const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
-  virtualPinnedColumns = columnOrder.filter((columnIndex) => pinned.has(columnIndex));
-  virtualScrollingColumns = columnOrder.filter((columnIndex) => !pinned.has(columnIndex));
-  const selection = ensureValidSelection(
-    virtualRows.map((item) => item.index),
-    columnOrder
-  );
-  const contentWidth = 54 + [...virtualPinnedColumns, ...virtualScrollingColumns].reduce(
+  virtualPinnedColumns = virtualColumnOrder.filter((columnIndex) => pinned.has(columnIndex));
+  virtualScrollingColumns = virtualColumnOrder.filter((columnIndex) => !pinned.has(columnIndex));
+  virtualScrollingWidths = virtualScrollingColumns.map(columnWidth);
+  virtualPinnedWidth = 54 + virtualPinnedColumns.reduce(
     (width, columnIndex) => width + columnWidth(columnIndex),
+    0
+  );
+  const selection = ensureValidSelection(virtualRowIndexes, virtualColumnOrder);
+  const contentWidth = virtualPinnedWidth + virtualScrollingWidths.reduce(
+    (width, columnWidthValue) => width + columnWidthValue,
     0
   );
   elements.tableSurface.style.width = `${Math.max(contentWidth, elements.tableScroll.clientWidth)}px`;
@@ -651,14 +677,10 @@ function renderVirtualViewport(): void {
     elements.tableScroll.scrollTop,
     Math.max(0, elements.tableScroll.clientHeight - VIRTUAL_HEADER_HEIGHT)
   );
-  const pinnedWidth = 54 + virtualPinnedColumns.reduce(
-    (width, columnIndex) => width + columnWidth(columnIndex),
-    0
-  );
   const columnRange = calculateVirtualColumns(
-    virtualScrollingColumns.map(columnWidth),
+    virtualScrollingWidths,
     elements.tableScroll.scrollLeft,
-    Math.max(0, elements.tableScroll.clientWidth - pinnedWidth),
+    Math.max(0, elements.tableScroll.clientWidth - virtualPinnedWidth),
     VIRTUAL_OVERSCAN
   );
   const columnSignature = [
@@ -685,6 +707,7 @@ function renderVirtualViewport(): void {
 
 function reconcileVirtualRows(rowRange: VirtualRange, columnRange: VirtualColumnRange): void {
   const count = rowRange.end - rowRange.start;
+  const scrollingColumns = virtualScrollingColumns.slice(columnRange.start, columnRange.end);
   while (elements.tableBody.children.length < count) {
     const row = document.createElement('div');
     row.className = 'virtual-row';
@@ -702,16 +725,16 @@ function reconcileVirtualRows(rowRange: VirtualRange, columnRange: VirtualColumn
     row.style.height = `${VIRTUAL_ROW_HEIGHT}px`;
     row.dataset.rowIndex = String(item.index);
     row.setAttribute('aria-rowindex', String(item.index + 2));
-    renderVirtualRow(row, item, columnRange);
+    renderVirtualRow(row, item, columnRange, scrollingColumns);
   }
 }
 
 function renderVirtualRow(
   row: HTMLElement,
   item: IndexedRow,
-  columnRange: VirtualColumnRange
+  columnRange: VirtualColumnRange,
+  scrollingColumns: number[]
 ): void {
-  const scrollingColumns = virtualScrollingColumns.slice(columnRange.start, columnRange.end);
   const required = 1 + virtualPinnedColumns.length + 1 + scrollingColumns.length + 1;
   while (row.children.length < required) row.appendChild(document.createElement('div'));
   while (row.children.length > required) row.lastElementChild?.remove();
@@ -881,18 +904,32 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
       event.stopPropagation();
       const startX = event.clientX;
       const startWidth = columnWidth(columnIndex);
+      let nextWidth = startWidth;
+      let pointerFrame = 0;
       resizeHandle.setPointerCapture(event.pointerId);
       const move = (moveEvent: PointerEvent): void => {
-        setColumnWidth(columnIndex, startWidth + moveEvent.clientX - startX, false);
+        nextWidth = startWidth + moveEvent.clientX - startX;
+        if (pointerFrame) return;
+        pointerFrame = window.requestAnimationFrame(() => {
+          pointerFrame = 0;
+          setColumnWidth(columnIndex, nextWidth, false);
+        });
       };
       const finish = (): void => {
         resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', finish);
+        resizeHandle.removeEventListener('pointercancel', finish);
+        if (pointerFrame) {
+          window.cancelAnimationFrame(pointerFrame);
+          pointerFrame = 0;
+        }
+        setColumnWidth(columnIndex, nextWidth, false);
         persistState();
         renderTable();
       };
       resizeHandle.addEventListener('pointermove', move);
-      resizeHandle.addEventListener('pointerup', finish, { once: true });
-      resizeHandle.addEventListener('pointercancel', finish, { once: true });
+      resizeHandle.addEventListener('pointerup', finish);
+      resizeHandle.addEventListener('pointercancel', finish);
     });
     resizeHandle.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -928,6 +965,7 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
 function renderColumnsMenu(): void {
   if (!dataset) return;
   elements.columnsList.replaceChildren();
+  const fragment = document.createDocumentFragment();
   const hidden = new Set(tableState.ui?.hiddenColumns ?? []);
   const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
   const visibleCount = dataset.columns.length - hidden.size;
@@ -972,8 +1010,9 @@ function renderColumnsMenu(): void {
     });
 
     item.append(visibility, pin);
-    elements.columnsList.appendChild(item);
+    fragment.appendChild(item);
   });
+  elements.columnsList.appendChild(fragment);
 }
 
 function currentColumnOrder(): number[] {
@@ -1061,7 +1100,7 @@ function ensureValidSelection(rowOrder: number[], columnOrder: number[]): CellSe
 function selectCell(selection: CellSelection, focus = false): void {
   if (!dataset) return;
   const rowPosition = virtualRows.findIndex((item) => item.index === selection.rowIndex);
-  if (rowPosition < 0 || !currentColumnOrder().includes(selection.columnIndex)) return;
+  if (rowPosition < 0 || !virtualColumnOrder.includes(selection.columnIndex)) return;
   updateUi({ selectedCell: selection }, false);
   scrollSelectionIntoView(selection, rowPosition);
   renderedRows = { start: -1, end: -1 };
@@ -1116,8 +1155,8 @@ function handleCellKeydown(event: KeyboardEvent): void {
   const next = navigateSelection(
     selection,
     event.key,
-    virtualRows.map((item) => item.index),
-    currentColumnOrder(),
+    virtualRowIndexes,
+    virtualColumnOrder,
     Math.max(
       1,
       Math.floor(
@@ -1305,7 +1344,7 @@ function resetTablePosition(): void {
 
 function persistState(): void {
   if (!dataset) return;
-  vscode.setState({ datasetSignature: datasetSignature(dataset), table: tableState });
+  vscode.setState({ datasetSignature: currentDatasetSignature, table: tableState });
 }
 
 function datasetSignature(value: DatasetPreview): string {
@@ -1339,20 +1378,17 @@ function isHostMessage(value: unknown): value is HostToWebviewMessage {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat().format(value);
+  return NUMBER_FORMATTER.format(value);
 }
 
 function formatCompact(value: string | number): string {
   return typeof value === 'number'
-    ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value)
+    ? COMPACT_NUMBER_FORMATTER.format(value)
     : String(value);
 }
 
 function formatPercent(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: 'percent',
-    maximumFractionDigits: 1
-  }).format(value);
+  return PERCENT_FORMATTER.format(value);
 }
 
 function formatBytes(bytes: number): string {

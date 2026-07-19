@@ -32,8 +32,10 @@ export async function loadPreview(
   filePath: string,
   options: PreviewOptions
 ): Promise<DatasetPreview> {
+  ensureNotCancelled(options.isCancelled);
   const extension = path.extname(filePath).toLowerCase();
   const stat = await fs.stat(filePath);
+  ensureNotCancelled(options.isCancelled);
   const limit = clampInteger(options.limit, 100, 5000, 2000);
   const maxColumns = clampInteger(options.maxColumns, 10, 2000, 500);
 
@@ -54,11 +56,12 @@ export async function loadPreview(
       extension === '.tsv' ? 'TSV' : 'CSV',
       limit,
       maxColumns,
-      parsingResult.value
+      parsingResult.value,
+      options.isCancelled
     );
   }
   if (extension === '.parquet') {
-    return readParquet(filePath, stat.size, limit, maxColumns);
+    return readParquet(filePath, stat.size, limit, maxColumns, options.isCancelled);
   }
   if (extension === '.xlsx' || extension === '.xlsm') {
     const maximumBytes =
@@ -71,7 +74,8 @@ export async function loadPreview(
     const maxExpandedBytes =
       clampNumber(options.maxExcelExpandedSizeMB, 10, 2000, 250) * 1024 * 1024;
     await validateExcelArchive(filePath, maxExpandedBytes);
-    return readExcel(filePath, stat.size, limit, maxColumns, options.sheet);
+    ensureNotCancelled(options.isCancelled);
+    return readExcel(filePath, stat.size, limit, maxColumns, options.sheet, options.isCancelled);
   }
 
   throw new Error(`Unsupported file type: ${extension || '(no extension)'}`);
@@ -83,14 +87,18 @@ async function readDelimited(
   format: 'CSV' | 'TSV',
   limit: number,
   maxColumns: number,
-  settings: DelimitedParsingSettings
+  settings: DelimitedParsingSettings,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
   const detectedDelimiter = await detectDelimiter(
     filePath,
     settings,
-    format === 'TSV' ? '\t' : ','
+    format === 'TSV' ? '\t' : ',',
+    isCancelled
   );
-  const delimiter = delimiterCharacter(settings.delimiter, settings.customDelimiter) ?? detectedDelimiter;
+  ensureNotCancelled(isCancelled);
+  const delimiter =
+    delimiterCharacter(settings.delimiter, settings.customDelimiter) ?? detectedDelimiter;
   const input = createReadStream(filePath);
   const parser = input.pipe(
     parse({
@@ -112,9 +120,11 @@ async function readDelimited(
   const rows: SerializableCell[][] = [];
   let sawExtraRow = false;
   let effectiveLimit = limit;
+  const nullTokens = new Set(settings.nullTokens);
 
   try {
     for await (const rawRecord of parser) {
+      ensureNotCancelled(isCancelled);
       const rawValues = rawRecord as unknown[];
       totalColumns = Math.max(totalColumns, rawValues.length);
       const rawRecordValues = rawValues.slice(0, maxColumns).map(normalizeCell);
@@ -131,7 +141,7 @@ async function readDelimited(
       }
       const record = rawValues
         .slice(0, maxColumns)
-        .map((value) => delimitedCellValue(value, settings));
+        .map((value) => delimitedCellValue(value, settings, nullTokens));
       ensureColumns(columns, Math.min(record.length, maxColumns));
       effectiveLimit = previewRowLimit(limit, columns.length);
       if (rows.length >= effectiveLimit) {
@@ -168,12 +178,15 @@ async function readParquet(
   filePath: string,
   fileSize: number,
   limit: number,
-  maxColumns: number
+  maxColumns: number,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
   const [{ asyncBufferFromFile, parquetMetadataAsync, parquetRead, parquetSchema }, compressorModule] =
     await Promise.all([import('hyparquet'), import('hyparquet-compressors')]);
+  ensureNotCancelled(isCancelled);
   const file = await asyncBufferFromFile(filePath);
   const metadata = await parquetMetadataAsync(file);
+  ensureNotCancelled(isCancelled);
   const totalRowsBigInt = metadata.num_rows;
   if (totalRowsBigInt < 0n) {
     throw new Error('Invalid Parquet metadata: negative row count.');
@@ -198,6 +211,7 @@ async function readParquet(
       rawRows = data as unknown[][];
     }
   });
+  ensureNotCancelled(isCancelled);
   const rows = rawRows.map((row) => columns.map((_column, index) => normalizeCell(row[index])));
 
   return makePreview({
@@ -217,10 +231,12 @@ async function readExcel(
   fileSize: number,
   limit: number,
   maxColumns: number,
-  requestedSheet?: string
+  requestedSheet?: string,
+  isCancelled?: () => boolean
 ): Promise<DatasetPreview> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
+  ensureNotCancelled(isCancelled);
   const sheets = workbook.worksheets.map((worksheet) => worksheet.name);
   const worksheet =
     (requestedSheet ? workbook.getWorksheet(requestedSheet) : undefined) ?? workbook.worksheets[0];
@@ -229,50 +245,45 @@ async function readExcel(
     throw new Error('The workbook does not contain a worksheet.');
   }
 
-  let headerRowNumber = 0;
-  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row = worksheet.getRow(rowNumber);
-    if (row.hasValues) {
-      headerRowNumber = rowNumber;
-      break;
-    }
-  }
+  const totalColumns = worksheet.columnCount;
+  let columns: string[] | undefined;
+  const rows: SerializableCell[][] = [];
+  let effectiveLimit = limit;
+  let sawExtraRow = false;
 
-  if (headerRowNumber === 0) {
+  worksheet.eachRow((row) => {
+    ensureNotCancelled(isCancelled);
+    if (!columns) {
+      const width = Math.min(Math.max(totalColumns, row.cellCount), maxColumns);
+      columns = uniqueHeaders(
+        Array.from({ length: width }, (_, index) => excelCellValue(row.getCell(index + 1)))
+      );
+      effectiveLimit = previewRowLimit(limit, columns.length);
+      return;
+    }
+    if (sawExtraRow) return;
+    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
+    if (values.every((value) => value === null)) return;
+    if (rows.length >= effectiveLimit) {
+      sawExtraRow = true;
+      return;
+    }
+    rows.push(values);
+  });
+
+  if (!columns) {
     return makePreview({
       filePath,
       format: 'EXCEL',
       fileSize,
       columns: [],
-      rows: [],
+      totalColumns,
+      rows,
       totalRows: 0,
       truncated: false,
       sheet: worksheet.name,
       sheets
     });
-  }
-
-  const headerRow = worksheet.getRow(headerRowNumber);
-  const totalColumns = Math.max(headerRow.cellCount, worksheet.actualColumnCount);
-  const width = Math.min(totalColumns, maxColumns);
-  const columns = uniqueHeaders(
-    Array.from({ length: width }, (_, index) => excelCellValue(headerRow.getCell(index + 1)))
-  );
-  const rows: SerializableCell[][] = [];
-  const effectiveLimit = previewRowLimit(limit, columns.length);
-  let sawExtraRow = false;
-
-  for (let rowNumber = headerRowNumber + 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row = worksheet.getRow(rowNumber);
-    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
-    if (values.every((value) => value === null)) {
-      continue;
-    }
-    if (rows.length >= effectiveLimit) {
-      sawExtraRow = true;
-      break;
-    }
-    rows.push(values);
   }
 
   return makePreview({
@@ -311,12 +322,15 @@ function excelCellValue(cell: ExcelJS.Cell): SerializableCell {
 async function detectDelimiter(
   filePath: string,
   settings: DelimitedParsingSettings,
-  fallback: string
+  fallback: string,
+  isCancelled?: () => boolean
 ): Promise<string> {
+  ensureNotCancelled(isCancelled);
   const handle = await fs.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(64 * 1024);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    ensureNotCancelled(isCancelled);
     const sample = buffer
       .subarray(0, bytesRead)
       .toString(settings.encoding)
@@ -363,10 +377,11 @@ function countOutsideQuotes(
 
 function delimitedCellValue(
   value: unknown,
-  settings: DelimitedParsingSettings
+  settings: DelimitedParsingSettings,
+  nullTokens: ReadonlySet<string>
 ): SerializableCell {
   if (typeof value !== 'string') return normalizeCell(value);
-  if (settings.nullTokens.includes(value)) return null;
+  if (nullTokens.has(value)) return null;
   const numeric = localizedNumber(
     value,
     settings.decimalSeparator,
@@ -420,10 +435,7 @@ function makePreview(input: {
   const truncation = {
     rows: input.truncated,
     columns: totalColumns > input.columns.length,
-    cells: input.rows.reduce(
-      (count, row) => count + row.filter((value) => isTruncatedCell(value)).length,
-      0
-    )
+    cells: countTruncatedCells(input.rows)
   };
   return {
     fileName: path.basename(input.filePath),
@@ -444,6 +456,16 @@ function makePreview(input: {
     sheet: input.sheet,
     sheets: input.sheets
   };
+}
+
+function countTruncatedCells(rows: SerializableCell[][]): number {
+  let count = 0;
+  for (const row of rows) {
+    for (const value of row) {
+      if (isTruncatedCell(value)) count += 1;
+    }
+  }
+  return count;
 }
 
 function previewRowLimit(requestedRows: number, columnCount: number): number {
@@ -488,6 +510,10 @@ function validateParquetPreviewSize(
 
 function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ensureNotCancelled(isCancelled: (() => boolean) | undefined): void {
+  if (isCancelled?.()) throw new Error('Preview loading was cancelled.');
 }
 
 function clampInteger(
