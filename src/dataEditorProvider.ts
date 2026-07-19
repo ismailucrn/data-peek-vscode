@@ -3,7 +3,12 @@ import * as vscode from 'vscode';
 import { copyCellText, copyRowAsTsv } from './clipboard';
 import { isSupportedFile, loadPreview } from './dataReader';
 import { isWebviewMessage } from './messages';
-import { DatasetPreview, WebviewToHostMessage } from './types';
+import { validateDelimitedParsingSettings } from './parsing';
+import {
+  DatasetPreview,
+  DelimitedParsingSettings,
+  WebviewToHostMessage
+} from './types';
 
 class DataDocument implements vscode.CustomDocument {
   constructor(readonly uri: vscode.Uri) {}
@@ -41,15 +46,26 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
     let disposed = false;
     let readyReceived = false;
     let latestPreview: DatasetPreview | undefined;
+    let parsingSettings: DelimitedParsingSettings | undefined;
 
-    const refresh = async (): Promise<void> => {
-      if (disposed || cancellationToken.isCancellationRequested) return;
+    const refresh = async (operation?: 'parsing'): Promise<boolean> => {
+      if (disposed || cancellationToken.isCancellationRequested) return false;
       if (loading) {
+        if (operation) {
+          await postOperationResult(
+            webviewPanel.webview,
+            'parsing',
+            false,
+            'Wait for the current preview load to finish.'
+          );
+          return false;
+        }
         queued = true;
-        return;
+        return false;
       }
       loading = true;
-      void webviewPanel.webview.postMessage({ type: 'loading' });
+      if (!operation) void webviewPanel.webview.postMessage({ type: 'loading' });
+      let succeeded = false;
       try {
         const configuration = vscode.workspace.getConfiguration('dataPeek');
         const preview = await loadPreview(document.uri.fsPath, {
@@ -57,17 +73,31 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           maxExcelFileSizeMB: configuration.get<number>('maxExcelFileSizeMB', 100),
           maxExcelExpandedSizeMB: configuration.get<number>('maxExcelExpandedSizeMB', 250),
           maxColumns: configuration.get<number>('maxColumns', 500),
-          sheet: selectedSheet
+          sheet: selectedSheet,
+          parsing: parsingSettings
         });
-        if (disposed || cancellationToken.isCancellationRequested) return;
+        if (disposed || cancellationToken.isCancellationRequested) return false;
         selectedSheet = preview.sheet;
         availableSheets = new Set(preview.sheets ?? []);
         latestPreview = preview;
         await webviewPanel.webview.postMessage({ type: 'dataset', payload: preview });
+        if (operation) {
+          await postOperationResult(
+            webviewPanel.webview,
+            'parsing',
+            true,
+            'Parsing settings applied to the preview.'
+          );
+        }
+        succeeded = true;
       } catch (error) {
-        if (disposed || cancellationToken.isCancellationRequested) return;
+        if (disposed || cancellationToken.isCancellationRequested) return false;
         const message = error instanceof Error ? error.message : String(error);
-        await webviewPanel.webview.postMessage({ type: 'error', message });
+        if (operation && latestPreview) {
+          await postOperationResult(webviewPanel.webview, 'parsing', false, message);
+        } else {
+          await webviewPanel.webview.postMessage({ type: 'error', message });
+        }
       } finally {
         loading = false;
         if (queued && !disposed && !cancellationToken.isCancellationRequested) {
@@ -75,6 +105,36 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           void refresh();
         }
       }
+      return succeeded;
+    };
+
+    const updateParsing = async (settings: unknown): Promise<void> => {
+      if (!latestPreview || (latestPreview.format !== 'CSV' && latestPreview.format !== 'TSV')) {
+        await postOperationResult(
+          webviewPanel.webview,
+          'parsing',
+          false,
+          'Parsing settings are available only for CSV and TSV previews.'
+        );
+        return;
+      }
+      const previous = parsingSettings;
+      if (settings === null) {
+        parsingSettings = undefined;
+      } else {
+        const validation = validateDelimitedParsingSettings(settings);
+        if (!validation.value) {
+          await postOperationResult(
+            webviewPanel.webview,
+            'parsing',
+            false,
+            validation.error ?? 'Invalid parsing settings.'
+          );
+          return;
+        }
+        parsingSettings = validation.value;
+      }
+      if (!(await refresh('parsing'))) parsingSettings = previous;
     };
 
     const messageSubscription = webviewPanel.webview.onDidReceiveMessage(
@@ -85,6 +145,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           void refresh();
         } else if (message.type === 'reload') {
           void refresh();
+        } else if (message.type === 'updateParsing') {
+          void updateParsing(message.settings);
         } else if (
           message.type === 'selectSheet' &&
           typeof message.sheet === 'string' &&
@@ -169,6 +231,84 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
       </section>
 
       <div id="operation-status" class="operation-status hidden" role="status" aria-live="polite"></div>
+
+      <section id="parsing-section" class="parsing-section hidden" aria-labelledby="parsing-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="parsing-title">CSV / TSV parsing</h2>
+            <span id="parsing-detected"></span>
+          </div>
+        </div>
+        <div class="parsing-grid">
+          <label class="field">
+            <span>Delimiter</span>
+            <select id="parsing-delimiter">
+              <option value="auto">Auto</option>
+              <option value="comma">Comma</option>
+              <option value="semicolon">Semicolon</option>
+              <option value="tab">Tab</option>
+              <option value="pipe">Pipe</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label id="parsing-custom-delimiter-wrap" class="field hidden">
+            <span>Custom delimiter</span>
+            <input id="parsing-custom-delimiter" type="text" maxlength="2" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Encoding</span>
+            <select id="parsing-encoding">
+              <option value="utf8">UTF-8</option>
+              <option value="utf16le">UTF-16LE</option>
+              <option value="latin1">Latin-1</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Header</span>
+            <select id="parsing-header">
+              <option value="firstNonEmpty">First non-empty row</option>
+              <option value="none">No header</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Rows to skip</span>
+            <input id="parsing-skip-rows" type="number" min="0" max="10000" step="1">
+          </label>
+          <label class="field">
+            <span>Quote</span>
+            <input id="parsing-quote" type="text" maxlength="2" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Escape</span>
+            <input id="parsing-escape" type="text" maxlength="2" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Decimal separator</span>
+            <select id="parsing-decimal">
+              <option value="dot">Dot</option>
+              <option value="comma">Comma</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Thousands separator</span>
+            <select id="parsing-thousands">
+              <option value="none">None</option>
+              <option value="comma">Comma</option>
+              <option value="dot">Dot</option>
+              <option value="space">Space</option>
+            </select>
+          </label>
+          <label class="field parsing-null-tokens">
+            <span>Null tokens (one per line, max 20)</span>
+            <textarea id="parsing-null-tokens" rows="3" maxlength="1300" autocomplete="off"></textarea>
+          </label>
+        </div>
+        <div class="parsing-actions">
+          <button id="parsing-apply" class="button" type="button">Apply</button>
+          <button id="parsing-reset" class="button secondary" type="button">Reset to detected defaults</button>
+        </div>
+        <div id="parsing-error" class="field-error hidden" role="alert"></div>
+      </section>
 
       <section id="filter-panel" class="filter-panel hidden" aria-labelledby="filter-title">
         <div class="filter-panel-heading">
@@ -261,6 +401,20 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
 </body>
 </html>`;
   }
+}
+
+async function postOperationResult(
+  webview: vscode.Webview,
+  operation: 'copy' | 'parsing',
+  success: boolean,
+  message: string
+): Promise<void> {
+  await webview.postMessage({
+    type: 'operationResult',
+    operation,
+    success,
+    message: message.slice(0, 256)
+  });
 }
 
 function getNonce(): string {

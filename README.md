@@ -11,6 +11,7 @@ Data Peek opens CSV, TSV, Parquet and modern Excel workbooks in an interactive, 
 - Resize, hide and pin columns; layout preferences stay with the open editor panel.
 - Navigate cells by keyboard and inspect or copy the complete selected value safely.
 - Inspect searchable preview-based profiles with missing/unique ratios, distributions, top values and data-quality warnings.
+- Reparse CSV and TSV previews with session-only delimiter, encoding, header, quote, null-token and locale-number settings.
 - Switch between worksheets in an Excel workbook.
 - Respect VS Code light, dark and high-contrast themes.
 
@@ -34,9 +35,12 @@ During development, use `pnpm run watch` and keep the Extension Development Host
 - `dataPeek.maxExcelExpandedSizeMB`: uncompressed Excel ZIP safety limit (default `250`).
 - `dataPeek.maxColumns`: maximum columns loaded into a preview (default `500`).
 
+## CSV and TSV parsing
+
+CSV and TSV editors expose parsing controls for automatic or explicit delimiters, UTF-8/UTF-16LE/Latin-1 encoding, headerless data, skipped leading rows, quote and escape characters, null tokens, and decimal/thousands separators. Applying an option safely reloads only the bounded preview. These choices remain in the open editor session and are not carried to other files.
+
 ## Planned next steps
 
-- Configurable CSV and TSV parsing options.
 - Exporting filtered data and generated Pandas/Polars code.
 
 ## License

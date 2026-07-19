@@ -8,6 +8,9 @@ import {
 } from '../src/tableState';
 import { formatCellDetail } from '../src/cellView';
 import {
+  validateDelimitedParsingSettings
+} from '../src/parsing';
+import {
   DEFAULT_COLUMN_WIDTH,
   NavigationKey,
   VIRTUAL_HEADER_HEIGHT,
@@ -27,6 +30,7 @@ import {
   ColumnFilter,
   CopyKind,
   DatasetPreview,
+  DelimitedParsingSettings,
   FilterOperator,
   HostToWebviewMessage,
   IndexedRow,
@@ -81,6 +85,22 @@ const elements = {
   columnsList: requiredElement<HTMLElement>('columns-list'),
   showAllColumns: requiredElement<HTMLButtonElement>('show-all-columns'),
   operationStatus: requiredElement<HTMLElement>('operation-status'),
+  parsingSection: requiredElement<HTMLElement>('parsing-section'),
+  parsingDetected: requiredElement<HTMLElement>('parsing-detected'),
+  parsingDelimiter: requiredElement<HTMLSelectElement>('parsing-delimiter'),
+  parsingCustomDelimiterWrap: requiredElement<HTMLElement>('parsing-custom-delimiter-wrap'),
+  parsingCustomDelimiter: requiredElement<HTMLInputElement>('parsing-custom-delimiter'),
+  parsingEncoding: requiredElement<HTMLSelectElement>('parsing-encoding'),
+  parsingHeader: requiredElement<HTMLSelectElement>('parsing-header'),
+  parsingSkipRows: requiredElement<HTMLInputElement>('parsing-skip-rows'),
+  parsingQuote: requiredElement<HTMLInputElement>('parsing-quote'),
+  parsingEscape: requiredElement<HTMLInputElement>('parsing-escape'),
+  parsingDecimal: requiredElement<HTMLSelectElement>('parsing-decimal'),
+  parsingThousands: requiredElement<HTMLSelectElement>('parsing-thousands'),
+  parsingNullTokens: requiredElement<HTMLTextAreaElement>('parsing-null-tokens'),
+  parsingApply: requiredElement<HTMLButtonElement>('parsing-apply'),
+  parsingReset: requiredElement<HTMLButtonElement>('parsing-reset'),
+  parsingError: requiredElement<HTMLElement>('parsing-error'),
   qualitySection: requiredElement<HTMLElement>('quality-section'),
   qualityWarnings: requiredElement<HTMLElement>('quality-warnings'),
   profiles: requiredElement<HTMLElement>('profiles'),
@@ -131,6 +151,13 @@ let renderedRows: VirtualRange = { start: -1, end: -1 };
 let renderedColumns = '';
 
 elements.reload.addEventListener('click', () => vscode.postMessage({ type: 'reload' }));
+elements.parsingDelimiter.addEventListener('change', renderCustomDelimiterField);
+elements.parsingApply.addEventListener('click', applyParsingSettings);
+elements.parsingReset.addEventListener('click', () => {
+  clearParsingError();
+  setParsingPending(true);
+  vscode.postMessage({ type: 'updateParsing', settings: null });
+});
 elements.search.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
@@ -215,6 +242,10 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
   } else if (message.type === 'dataset') {
     receiveDataset(message.payload);
   } else {
+    if (message.operation === 'parsing') {
+      setParsingPending(false);
+      if (!message.success) showParsingError(message.message);
+    }
     showOperationStatus(message.message, message.success);
   }
 });
@@ -262,6 +293,7 @@ function renderDataset(): void {
   elements.fileName.textContent = dataset.fileName;
   renderMetadata();
   renderSheetPicker();
+  renderParsingSettings();
   renderColumnsMenu();
   renderQualityWarnings();
   renderProfiles();
@@ -280,6 +312,10 @@ function renderMetadata(): void {
     : `${formatNumber(dataset.columns.length)} columns`;
   const labels = [dataset.format, total, columnLabel, formatBytes(dataset.fileSize)];
   if (dataset.truncated) labels.push(`Previewing first ${formatNumber(dataset.previewRowCount)}`);
+  if (dataset.parsing) {
+    labels.push(`Delimiter ${delimiterLabel(dataset.parsing.resolvedDelimiter)}`);
+    labels.push(encodingLabel(dataset.parsing.applied.encoding));
+  }
   for (const label of labels) {
     const badge = document.createElement('span');
     badge.className = 'badge';
@@ -304,6 +340,135 @@ function renderSheetPicker(): void {
     elements.sheet.appendChild(option);
   }
   elements.sheetWrap.classList.remove('hidden');
+}
+
+function renderParsingSettings(): void {
+  if (!dataset?.parsing || (dataset.format !== 'CSV' && dataset.format !== 'TSV')) {
+    elements.parsingSection.classList.add('hidden');
+    return;
+  }
+  const settings = dataset.parsing.applied;
+  elements.parsingDelimiter.value = settings.delimiter;
+  elements.parsingCustomDelimiter.value = settings.customDelimiter ?? '';
+  elements.parsingEncoding.value = settings.encoding;
+  elements.parsingHeader.value = settings.header;
+  elements.parsingSkipRows.value = String(settings.skipRows);
+  elements.parsingQuote.value = settings.quote;
+  elements.parsingEscape.value = settings.escape;
+  elements.parsingDecimal.value = settings.decimalSeparator;
+  elements.parsingThousands.value = settings.thousandsSeparator;
+  elements.parsingNullTokens.value = settings.nullTokens.join('\n');
+  elements.parsingDetected.textContent =
+    `Detected ${delimiterLabel(dataset.parsing.detectedDelimiter)} · Settings stay in this editor session`;
+  renderCustomDelimiterField();
+  clearParsingError();
+  setParsingPending(false);
+  elements.parsingSection.classList.remove('hidden');
+}
+
+function renderCustomDelimiterField(): void {
+  elements.parsingCustomDelimiterWrap.classList.toggle(
+    'hidden',
+    elements.parsingDelimiter.value !== 'custom'
+  );
+}
+
+function applyParsingSettings(): void {
+  const candidate: DelimitedParsingSettings = {
+    delimiter: elements.parsingDelimiter.value as DelimitedParsingSettings['delimiter'],
+    ...(elements.parsingDelimiter.value === 'custom'
+      ? { customDelimiter: elements.parsingCustomDelimiter.value }
+      : {}),
+    encoding: elements.parsingEncoding.value as DelimitedParsingSettings['encoding'],
+    header: elements.parsingHeader.value as DelimitedParsingSettings['header'],
+    skipRows: Number(elements.parsingSkipRows.value),
+    quote: elements.parsingQuote.value,
+    escape: elements.parsingEscape.value,
+    nullTokens: elements.parsingNullTokens.value
+      .split(/\r?\n/)
+      .filter((token) => token.length > 0),
+    decimalSeparator:
+      elements.parsingDecimal.value as DelimitedParsingSettings['decimalSeparator'],
+    thousandsSeparator:
+      elements.parsingThousands.value as DelimitedParsingSettings['thousandsSeparator']
+  };
+  const validation = validateDelimitedParsingSettings(candidate);
+  if (!validation.value) {
+    showParsingError(validation.error ?? 'Invalid parsing settings.', validation.field);
+    return;
+  }
+  clearParsingError();
+  setParsingPending(true);
+  vscode.postMessage({ type: 'updateParsing', settings: validation.value });
+}
+
+function showParsingError(
+  message: string,
+  field?: keyof DelimitedParsingSettings
+): void {
+  clearParsingError();
+  elements.parsingError.textContent = message;
+  elements.parsingError.classList.remove('hidden');
+  parsingFieldElement(field)?.setAttribute('aria-invalid', 'true');
+}
+
+function clearParsingError(): void {
+  elements.parsingError.textContent = '';
+  elements.parsingError.classList.add('hidden');
+  for (const element of parsingFieldElements()) element.removeAttribute('aria-invalid');
+}
+
+function parsingFieldElement(
+  field: keyof DelimitedParsingSettings | undefined
+): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | undefined {
+  if (field === 'delimiter') return elements.parsingDelimiter;
+  if (field === 'customDelimiter') return elements.parsingCustomDelimiter;
+  if (field === 'encoding') return elements.parsingEncoding;
+  if (field === 'header') return elements.parsingHeader;
+  if (field === 'skipRows') return elements.parsingSkipRows;
+  if (field === 'quote') return elements.parsingQuote;
+  if (field === 'escape') return elements.parsingEscape;
+  if (field === 'nullTokens') return elements.parsingNullTokens;
+  if (field === 'decimalSeparator') return elements.parsingDecimal;
+  if (field === 'thousandsSeparator') return elements.parsingThousands;
+  return undefined;
+}
+
+function parsingFieldElements(): Array<
+  HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+> {
+  return [
+    elements.parsingDelimiter,
+    elements.parsingCustomDelimiter,
+    elements.parsingEncoding,
+    elements.parsingHeader,
+    elements.parsingSkipRows,
+    elements.parsingQuote,
+    elements.parsingEscape,
+    elements.parsingNullTokens,
+    elements.parsingDecimal,
+    elements.parsingThousands
+  ];
+}
+
+function setParsingPending(pending: boolean): void {
+  elements.parsingApply.disabled = pending;
+  elements.parsingReset.disabled = pending;
+}
+
+function delimiterLabel(character: string): string {
+  if (character === '\t') return 'Tab';
+  if (character === ' ') return 'Space';
+  if (character === ',') return 'Comma';
+  if (character === ';') return 'Semicolon';
+  if (character === '|') return 'Pipe';
+  return `“${character}”`;
+}
+
+function encodingLabel(encoding: DelimitedParsingSettings['encoding']): string {
+  if (encoding === 'utf16le') return 'UTF-16LE';
+  if (encoding === 'latin1') return 'Latin-1';
+  return 'UTF-8';
 }
 
 function renderProfiles(): void {
@@ -1160,7 +1325,7 @@ function isHostMessage(value: unknown): value is HostToWebviewMessage {
   if (message.type === 'error') return typeof message.message === 'string';
   if (message.type === 'operationResult') {
     return (
-      message.operation === 'copy' &&
+      (message.operation === 'copy' || message.operation === 'parsing') &&
       typeof message.success === 'boolean' &&
       typeof message.message === 'string' &&
       message.message.length <= 256
