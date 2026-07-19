@@ -135,6 +135,7 @@ async function readDelimited(
       ensureColumns(columns, Math.min(record.length, maxColumns));
       effectiveLimit = previewRowLimit(limit, columns.length);
       if (rows.length >= effectiveLimit) {
+        if (rows.length > effectiveLimit) rows.length = effectiveLimit;
         sawExtraRow = true;
         break;
       }

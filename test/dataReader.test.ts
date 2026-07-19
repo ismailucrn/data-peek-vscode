@@ -65,6 +65,21 @@ test('preserves the 250,000-cell budget at configured row and column limits', as
   });
 });
 
+test('reapplies the cell budget when a later delimited row widens the preview', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'late-wide.csv');
+    const narrowRows = Array.from({ length: 600 }, (_, index) => String(index));
+    const wideRow = Array.from({ length: 500 }, (_, index) => String(index)).join(',');
+    await fs.writeFile(filePath, `first\n${narrowRows.join('\n')}\n${wideRow}\n`, 'utf8');
+
+    const preview = await loadPreview(filePath, { ...options, limit: 5_000, maxColumns: 500 });
+    assert.equal(preview.columns.length, 500);
+    assert.equal(preview.rows.length, 500);
+    assert.equal(preview.rows.length * preview.columns.length, 250_000);
+    assert.equal(preview.truncation.rows, true);
+  });
+});
+
 test('reads a quoted CSV preview and reports truncation', async () => {
   await withTemporaryDirectory(async (directory) => {
     const filePath = path.join(directory, 'people.csv');
