@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "publisher": "local-data-tools",
   "license": "MIT",
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@10.34.5",
   "repository": {
     "type": "git",
     "url": "https://github.com/ismailucrn/data-peek-vscode.git"
