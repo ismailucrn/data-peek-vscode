@@ -350,22 +350,23 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         <div id="quality-warnings" class="quality-warnings"></div>
       </section>
 
-      <section class="profiles-section" aria-labelledby="profiles-title">
-        <div class="section-heading">
-          <div>
-            <h2 id="profiles-title">Column profile</h2>
-            <span id="profiles-note">Based on preview</span>
-          </div>
-          <div class="profile-controls">
-            <input id="profile-search" type="search" placeholder="Find a column…" aria-label="Find a profile column" autocomplete="off">
-            <button id="toggle-profiles" class="button small secondary" type="button" aria-expanded="true">Collapse</button>
-          </div>
-        </div>
-        <div id="profiles" class="profiles"></div>
-      </section>
-
       <div class="table-workspace">
         <section class="table-section" aria-label="Data preview">
+          <section class="profiles-section" aria-labelledby="profiles-title">
+            <div class="section-heading">
+              <div>
+                <h2 id="profiles-title">Column profile</h2>
+                <span id="profiles-note">Based on preview</span>
+              </div>
+              <div class="profile-controls">
+                <input id="profile-search" type="search" placeholder="Find a column…" aria-label="Find a profile column" autocomplete="off">
+                <button id="toggle-profiles" class="button small secondary" type="button" aria-expanded="true">Collapse</button>
+              </div>
+            </div>
+            <div id="profiles" class="profiles">
+              <div id="profiles-surface" class="profiles-surface"></div>
+            </div>
+          </section>
           <div id="table-scroll" class="table-scroll" role="grid" aria-label="Loaded data preview" tabindex="-1">
             <div id="table-surface" class="table-surface">
               <div id="table-head" class="virtual-header" role="row" aria-rowindex="1"></div>

@@ -112,6 +112,7 @@ const elements = {
   qualitySection: requiredElement<HTMLElement>('quality-section'),
   qualityWarnings: requiredElement<HTMLElement>('quality-warnings'),
   profiles: requiredElement<HTMLElement>('profiles'),
+  profilesSurface: requiredElement<HTMLElement>('profiles-surface'),
   profilesNote: requiredElement<HTMLElement>('profiles-note'),
   profileSearch: requiredElement<HTMLInputElement>('profile-search'),
   toggleProfiles: requiredElement<HTMLButtonElement>('toggle-profiles'),
@@ -187,6 +188,7 @@ elements.tableScroll.addEventListener('scroll', () => {
   if (scrollFrame) return;
   scrollFrame = window.requestAnimationFrame(() => {
     scrollFrame = 0;
+    elements.profiles.scrollLeft = elements.tableScroll.scrollLeft;
     renderVirtualViewport();
   });
 }, { passive: true });
@@ -310,7 +312,6 @@ function renderDataset(): void {
   renderParsingSettings();
   renderColumnsMenu();
   renderQualityWarnings();
-  renderProfiles();
   renderTable();
 }
 
@@ -487,21 +488,49 @@ function encodingLabel(encoding: DelimitedParsingSettings['encoding']): string {
 
 function renderProfiles(): void {
   if (!dataset) return;
-  elements.profiles.replaceChildren();
+  elements.profilesSurface.replaceChildren();
   const collapsed = tableState.ui?.profilesCollapsed ?? false;
   const query = (tableState.ui?.profileQuery ?? '').trim().toLowerCase();
-  const visibleProfiles = dataset.profiles.filter((profile) =>
-    profile.name.toLowerCase().includes(query)
+  const matchedColumns = virtualColumnOrder.filter((columnIndex) =>
+    dataset?.profiles[columnIndex]?.name.toLowerCase().includes(query)
   );
   elements.profiles.classList.toggle('hidden', collapsed);
   elements.toggleProfiles.textContent = collapsed ? 'Expand' : 'Collapse';
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
-  elements.profilesNote.textContent = `Based on preview · ${visibleProfiles.length} of ${dataset.profiles.length}`;
+  elements.profilesNote.textContent =
+    `Based on preview · ${matchedColumns.length} of ${virtualColumnOrder.length} visible`;
   if (collapsed) return;
+
+  const contentWidth = virtualPinnedWidth + virtualScrollingWidths.reduce(
+    (width, columnWidthValue) => width + columnWidthValue,
+    0
+  );
+  elements.profiles.style.width = `${elements.tableScroll.clientWidth}px`;
+  elements.profilesSurface.style.width =
+    `${Math.max(contentWidth, elements.tableScroll.clientWidth)}px`;
   const fragment = document.createDocumentFragment();
-  for (const profile of visibleProfiles) {
+  const gutter = document.createElement('div');
+  gutter.className = 'profile-gutter';
+  gutter.setAttribute('aria-hidden', 'true');
+  fragment.appendChild(gutter);
+
+  for (const columnIndex of virtualColumnOrder) {
+    const profile = dataset.profiles[columnIndex];
+    if (!profile) continue;
+    if (query && !profile.name.toLowerCase().includes(query)) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'profile-placeholder';
+      placeholder.dataset.columnIndex = String(columnIndex);
+      applyColumnDimensions(placeholder, columnIndex);
+      if (virtualPinnedColumns.includes(columnIndex)) applyPinnedStyle(placeholder, columnIndex);
+      fragment.appendChild(placeholder);
+      continue;
+    }
     const card = document.createElement('article');
     card.className = 'profile-card';
+    card.dataset.columnIndex = String(columnIndex);
+    applyColumnDimensions(card, columnIndex);
+    if (virtualPinnedColumns.includes(columnIndex)) applyPinnedStyle(card, columnIndex);
     const heading = document.createElement('div');
     heading.className = 'profile-heading';
     const name = document.createElement('strong');
@@ -547,7 +576,8 @@ function renderProfiles(): void {
     }
     fragment.appendChild(card);
   }
-  elements.profiles.appendChild(fragment);
+  elements.profilesSurface.appendChild(fragment);
+  elements.profiles.scrollLeft = elements.tableScroll.scrollLeft;
 }
 
 function renderQualityWarnings(): void {
@@ -666,6 +696,7 @@ function renderTable(): void {
     : `${formatNumber(virtualRows.length)} preview rows.`;
   renderedRows = { start: -1, end: -1 };
   renderedColumns = '';
+  renderProfiles();
   renderVirtualViewport();
 }
 
