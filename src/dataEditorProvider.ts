@@ -311,37 +311,6 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         <div id="parsing-error" class="field-error hidden" role="alert"></div>
       </section>
 
-      <section id="filter-panel" class="filter-panel hidden" aria-labelledby="filter-title">
-        <div class="filter-panel-heading">
-          <div>
-            <span class="eyebrow">COLUMN FILTER</span>
-            <h2 id="filter-title">Filter column</h2>
-          </div>
-          <button id="filter-cancel" class="icon-button" type="button" aria-label="Close filter">×</button>
-        </div>
-        <div class="filter-fields">
-          <label class="field">
-            <span>Operator</span>
-            <select id="filter-operator"></select>
-          </label>
-          <label id="filter-value-wrap" class="field">
-            <span>Value</span>
-            <input id="filter-value" type="text" autocomplete="off" aria-describedby="filter-error">
-          </label>
-          <label id="filter-second-value-wrap" class="field hidden">
-            <span>To</span>
-            <input id="filter-second-value" type="text" autocomplete="off" aria-describedby="filter-error">
-          </label>
-          <button id="filter-apply" class="button" type="button">Apply filter</button>
-        </div>
-        <div id="filter-error" class="field-error hidden" role="alert"></div>
-      </section>
-
-      <section id="active-filters" class="active-filters hidden" aria-label="Active filters">
-        <div id="filter-chips" class="filter-chips"></div>
-        <button id="clear-filters" class="link-button" type="button">Clear all</button>
-      </section>
-
       <section id="quality-section" class="quality-section hidden" aria-labelledby="quality-title">
         <div class="section-heading">
           <h2 id="quality-title">Data quality</h2>
@@ -366,6 +335,41 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
             <div id="profiles" class="profiles">
               <div id="profiles-surface" class="profiles-surface"></div>
             </div>
+          </section>
+          <section id="active-filters" class="active-filters hidden" aria-label="Active filters">
+            <div class="active-filters-content">
+              <span class="active-filters-label">Active filters</span>
+              <div id="filter-chips" class="filter-chips"></div>
+            </div>
+            <button id="clear-filters" class="link-button" type="button">Clear all</button>
+          </section>
+          <section id="filter-panel" class="filter-panel hidden" aria-labelledby="filter-title">
+            <div class="filter-panel-heading">
+              <div class="filter-title-group">
+                <span class="filter-icon" aria-hidden="true"></span>
+                <div>
+                  <span>Filtering column</span>
+                  <h2 id="filter-title">Filter column</h2>
+                </div>
+              </div>
+              <button id="filter-cancel" class="icon-button" type="button" aria-label="Close filter">×</button>
+            </div>
+            <div id="filter-fields" class="filter-fields">
+              <label class="field">
+                <span>Condition</span>
+                <select id="filter-operator"></select>
+              </label>
+              <label id="filter-value-wrap" class="field">
+                <span>Value</span>
+                <input id="filter-value" type="text" autocomplete="off" aria-describedby="filter-error">
+              </label>
+              <label id="filter-second-value-wrap" class="field hidden">
+                <span>To</span>
+                <input id="filter-second-value" type="text" autocomplete="off" aria-describedby="filter-error">
+              </label>
+              <button id="filter-apply" class="button filter-apply" type="button">Add filter</button>
+            </div>
+            <div id="filter-error" class="field-error hidden" role="alert"></div>
           </section>
           <div id="table-scroll" class="table-scroll" role="grid" aria-label="Loaded data preview" tabindex="-1">
             <div id="table-surface" class="table-surface">

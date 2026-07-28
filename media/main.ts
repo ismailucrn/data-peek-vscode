@@ -124,6 +124,7 @@ const elements = {
   resultCount: requiredElement<HTMLElement>('result-count'),
   filterPanel: requiredElement<HTMLElement>('filter-panel'),
   filterTitle: requiredElement<HTMLElement>('filter-title'),
+  filterFields: requiredElement<HTMLElement>('filter-fields'),
   filterOperator: requiredElement<HTMLSelectElement>('filter-operator'),
   filterValueWrap: requiredElement<HTMLElement>('filter-value-wrap'),
   filterValue: requiredElement<HTMLInputElement>('filter-value'),
@@ -233,6 +234,9 @@ elements.toggleProfiles.addEventListener('click', () => {
 elements.filterOperator.addEventListener('change', renderFilterValueFields);
 elements.filterApply.addEventListener('click', applyFilter);
 elements.filterCancel.addEventListener('click', closeFilterPanel);
+elements.filterPanel.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeFilterPanel();
+});
 elements.clearFilters.addEventListener('click', () => {
   tableState = { ...tableState, filters: [] };
   resetTablePosition();
@@ -919,10 +923,14 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
     if (tableState.filters.some((filter) => filter.columnIndex === columnIndex)) {
       filterButton.classList.add('active');
     }
-    filterButton.textContent = '⌄';
     filterButton.title = `Filter ${column}`;
     filterButton.setAttribute('aria-label', `Filter ${column}`);
-    filterButton.addEventListener('click', () => openFilterPanel(columnIndex));
+    filterButton.setAttribute('aria-controls', 'filter-panel');
+    filterButton.setAttribute('aria-expanded', String(activeFilterColumn === columnIndex));
+    filterButton.addEventListener('click', () => {
+      if (activeFilterColumn === columnIndex) closeFilterPanel();
+      else openFilterPanel(columnIndex);
+    });
 
     const resizeHandle = document.createElement('span');
     resizeHandle.className = 'resize-handle';
@@ -1267,6 +1275,13 @@ function openFilterPanel(columnIndex: number): void {
   clearFilterError();
   renderFilterValueFields();
   elements.filterPanel.classList.remove('hidden');
+  document.querySelectorAll<HTMLButtonElement>('.filter-button').forEach((button) => {
+    const header = button.closest<HTMLElement>('[data-column-index]');
+    button.setAttribute('aria-expanded', String(Number(header?.dataset.columnIndex) === columnIndex));
+  });
+  window.requestAnimationFrame(() => {
+    elements.filterPanel.scrollIntoView({ block: 'nearest' });
+  });
   if (operatorNeedsValue(selectedOperator())) elements.filterValue.focus();
   else elements.filterOperator.focus();
 }
@@ -1275,11 +1290,16 @@ function closeFilterPanel(): void {
   activeFilterColumn = null;
   clearFilterError();
   elements.filterPanel.classList.add('hidden');
+  document.querySelectorAll<HTMLButtonElement>('.filter-button').forEach((button) => {
+    button.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function renderFilterValueFields(): void {
   const operator = selectedOperator();
   const needsValue = operatorNeedsValue(operator);
+  elements.filterFields.classList.toggle('no-value', !needsValue);
+  elements.filterFields.classList.toggle('between', operator === 'between');
   elements.filterValueWrap.classList.toggle('hidden', !needsValue);
   elements.filterSecondValueWrap.classList.toggle('hidden', operator !== 'between');
   clearFilterError();
