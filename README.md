@@ -11,19 +11,19 @@ Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TS
 - Resize, hide, and pin columns.
 - Navigate cells with the keyboard and inspect the complete selected value.
 - Copy a cell, row, or column name to the clipboard.
-- View preview profiles for numeric, boolean, date, text, mixed, and empty columns.
+- View background-calculated full-data profiles for numeric, boolean, date, text, mixed, and empty columns.
 - Review missing and unique ratios, distributions, top values, and data-quality warnings.
 - Switch between worksheets in an Excel workbook.
 - Adjust session-only parsing settings for CSV and TSV files.
 - Use the editor in VS Code light, dark, and high-contrast themes.
 
-The editor never changes or writes back to the source file. CSV/TSV and Parquet readers operate within preview limits; Excel workbooks are loaded in memory and protected by file-size and expanded-ZIP limits.
+The editor never changes or writes back to the source file. CSV/TSV and Parquet readers operate within explicit preview and profiling limits; Excel workbooks are loaded in memory and protected by file-size and expanded-ZIP limits.
 
 ## Safety and limits
 
-Data Peek treats files as untrusted input. Preview rows, columns, total cells, cell size, and expanded Parquet data are bounded. Excel archives pass ZIP safety checks before ExcelJS loads them. File values are never interpreted as HTML; they are rendered through safe DOM text nodes.
+Data Peek treats files as untrusted input. Preview rows, columns, total cells, cell size, and expanded Parquet data are bounded. Full-data profiling has a separate scan-size boundary and uses bounded-memory summaries. Excel archives pass ZIP safety checks before ExcelJS loads them. File values are never interpreted as HTML; they are rendered through safe DOM text nodes.
 
-Previews and profiles are calculated only from loaded rows. When row or column limits are reached, the editor indicates truncation and shows the relevant quality warnings.
+The bounded table preview appears first. When the source has more rows, column profiles are recalculated in the background across the complete dataset and replace the preview profiles when ready. Counts, missing ratios, types, minimums, maximums, means, standard deviations, and text-length bounds are exact. On high-cardinality columns, bounded-memory estimates for distinct counts, medians, histograms, and top values are marked with `≈`. Search, filters, sorting, duplicate-row warnings, and copied rows continue to operate only on the loaded table preview.
 
 ## Usage
 
@@ -40,6 +40,7 @@ Previews and profiles are calculated only from loaded rows. When row or column l
 | `dataPeek.maxColumns` | `500` | `10–2000` | Maximum columns loaded into the preview |
 | `dataPeek.maxExcelFileSizeMB` | `100` | `1–1000` | Maximum Excel workbook size that may be loaded into memory |
 | `dataPeek.maxExcelExpandedSizeMB` | `250` | `10–2000` | Maximum allowed uncompressed size of an Excel ZIP archive |
+| `dataPeek.maxProfileScanSizeMB` | `1024` | `64–8192` | Maximum source or selected uncompressed Parquet data scanned for full-data profiles |
 
 ## CSV and TSV parsing
 

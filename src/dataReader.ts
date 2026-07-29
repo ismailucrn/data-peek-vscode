@@ -10,11 +10,18 @@ import {
   localizedNumber,
   validateDelimitedParsingSettings
 } from './parsing';
-import { buildProfiles, isTruncatedCell, normalizeCell } from './profile';
+import {
+  StreamingProfileBuilder,
+  buildProfiles,
+  isTruncatedCell,
+  normalizeCell
+} from './profile';
 import {
   DatasetPreview,
   DelimitedParsingMetadata,
   DelimitedParsingSettings,
+  FullProfileOptions,
+  FullProfileResult,
   PreviewOptions,
   SerializableCell
 } from './types';
@@ -79,6 +86,225 @@ export async function loadPreview(
   }
 
   throw new Error(`Unsupported file type: ${extension || '(no extension)'}`);
+}
+
+export async function loadFullProfiles(
+  filePath: string,
+  options: FullProfileOptions
+): Promise<FullProfileResult> {
+  ensureNotCancelled(options.isCancelled);
+  const extension = path.extname(filePath).toLowerCase();
+  const stat = await fs.stat(filePath);
+  const maximumScanBytes =
+    clampNumber(options.maxProfileScanSizeMB, 64, 8192, 1024) * 1024 * 1024;
+  if (!stat.isFile()) throw new Error('The selected resource is not a file.');
+  if (stat.size > maximumScanBytes) {
+    throw new Error(
+      `Full-data profiling is limited to ${formatBytes(maximumScanBytes)}. ` +
+      'Increase dataPeek.maxProfileScanSizeMB to scan this file.'
+    );
+  }
+
+  if (extension === '.csv' || extension === '.tsv') {
+    const parsingResult = validateDelimitedParsingSettings(
+      options.parsing ?? defaultDelimitedParsingSettings()
+    );
+    if (!parsingResult.value) {
+      throw new Error(`Invalid parsing settings: ${parsingResult.error ?? 'unknown error'}`);
+    }
+    return profileDelimited(
+      filePath,
+      extension === '.tsv' ? '\t' : ',',
+      options.columns,
+      parsingResult.value,
+      options
+    );
+  }
+  if (extension === '.parquet') {
+    return profileParquet(filePath, options.columns, maximumScanBytes, options);
+  }
+  if (extension === '.xlsx' || extension === '.xlsm') {
+    const maximumBytes =
+      clampNumber(options.maxExcelFileSizeMB, 1, 1000, 100) * 1024 * 1024;
+    if (stat.size > maximumBytes) {
+      throw new Error(
+        `This workbook is ${formatBytes(stat.size)}. Increase dataPeek.maxExcelFileSizeMB to open it.`
+      );
+    }
+    const maxExpandedBytes =
+      clampNumber(options.maxExcelExpandedSizeMB, 10, 2000, 250) * 1024 * 1024;
+    await validateExcelArchive(filePath, maxExpandedBytes);
+    return profileExcel(filePath, options.columns, options);
+  }
+  throw new Error(`Unsupported file type: ${extension || '(no extension)'}`);
+}
+
+async function profileDelimited(
+  filePath: string,
+  fallbackDelimiter: string,
+  columns: string[],
+  settings: DelimitedParsingSettings,
+  options: FullProfileOptions
+): Promise<FullProfileResult> {
+  const detectedDelimiter = await detectDelimiter(
+    filePath,
+    settings,
+    fallbackDelimiter,
+    options.isCancelled
+  );
+  const delimiter =
+    delimiterCharacter(settings.delimiter, settings.customDelimiter) ?? detectedDelimiter;
+  const input = createReadStream(filePath);
+  const parser = input.pipe(
+    parse({
+      bom: true,
+      delimiter,
+      encoding: settings.encoding,
+      escape: settings.escape,
+      from_line: settings.skipRows + 1,
+      quote: settings.quote,
+      relax_column_count: true,
+      relax_quotes: true,
+      max_record_size: MAX_CSV_RECORD_BYTES,
+      skip_empty_lines: true
+    })
+  );
+  const builder = new StreamingProfileBuilder(columns);
+  const nullTokens = new Set(settings.nullTokens);
+  let rowCount = 0;
+  let firstRecord = true;
+  const report = progressReporter(options.onProgress, null);
+  try {
+    for await (const rawRecord of parser) {
+      ensureNotCancelled(options.isCancelled);
+      if (firstRecord && settings.header === 'firstNonEmpty') {
+        firstRecord = false;
+        continue;
+      }
+      firstRecord = false;
+      const values = (rawRecord as unknown[])
+        .slice(0, columns.length)
+        .map((value) => delimitedCellValue(value, settings, nullTokens));
+      builder.addRow(values);
+      rowCount += 1;
+      if (rowCount % 10_000 === 0) report(rowCount);
+    }
+  } finally {
+    input.destroy();
+    parser.destroy();
+  }
+  report(rowCount, true);
+  return { profiles: builder.finish(rowCount), rowCount };
+}
+
+async function profileParquet(
+  filePath: string,
+  columns: string[],
+  maximumScanBytes: number,
+  options: FullProfileOptions
+): Promise<FullProfileResult> {
+  const [{ asyncBufferFromFile, parquetMetadataAsync, parquetRead }, compressorModule] =
+    await Promise.all([import('hyparquet'), import('hyparquet-compressors')]);
+  ensureNotCancelled(options.isCancelled);
+  const file = await asyncBufferFromFile(filePath);
+  const metadata = await parquetMetadataAsync(file);
+  const totalRowsBigInt = metadata.num_rows;
+  if (totalRowsBigInt < 0n || totalRowsBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('The Parquet row count cannot be profiled safely.');
+  }
+  const rowCount = Number(totalRowsBigInt);
+  validateParquetExpandedSize(
+    metadata.row_groups,
+    new Set(columns),
+    rowCount,
+    BigInt(maximumScanBytes),
+    `Full-data Parquet profiling exceeds the ${formatBytes(maximumScanBytes)} safety limit. ` +
+      'Increase dataPeek.maxProfileScanSizeMB or reduce dataPeek.maxColumns.'
+  );
+  const builder = new StreamingProfileBuilder(columns);
+  const columnIndexes = new Map(columns.map((column, index) => [column, index]));
+  const columnProgress = new Map(columns.map((column) => [column, 0]));
+  const report = progressReporter(options.onProgress, rowCount);
+  await parquetRead({
+    file,
+    metadata,
+    columns,
+    compressors: compressorModule.compressors,
+    onChunk: (chunk: {
+      columnName: string;
+      columnData: ArrayLike<unknown>;
+      rowEnd: number;
+    }) => {
+      ensureNotCancelled(options.isCancelled);
+      const columnIndex = columnIndexes.get(chunk.columnName);
+      if (columnIndex === undefined) return;
+      builder.addColumnValues(columnIndex, chunk.columnData);
+      columnProgress.set(chunk.columnName, Math.max(columnProgress.get(chunk.columnName) ?? 0, chunk.rowEnd));
+      const processedRows = Math.min(...columnProgress.values());
+      report(processedRows);
+    }
+  });
+  ensureNotCancelled(options.isCancelled);
+  report(rowCount, true);
+  return { profiles: builder.finish(rowCount), rowCount };
+}
+
+async function profileExcel(
+  filePath: string,
+  columns: string[],
+  options: FullProfileOptions
+): Promise<FullProfileResult> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  ensureNotCancelled(options.isCancelled);
+  const worksheet =
+    (options.sheet ? workbook.getWorksheet(options.sheet) : undefined) ?? workbook.worksheets[0];
+  if (!worksheet) throw new Error('The workbook does not contain a worksheet.');
+  const builder = new StreamingProfileBuilder(columns);
+  let rowCount = 0;
+  let headerRowNumber = 1;
+  while (
+    headerRowNumber <= worksheet.actualRowCount &&
+    !worksheet.getRow(headerRowNumber).hasValues
+  ) {
+    headerRowNumber += 1;
+  }
+  const possibleRows = Math.max(0, worksheet.actualRowCount - headerRowNumber);
+  const report = progressReporter(options.onProgress, possibleRows);
+  for (
+    let rowNumber = headerRowNumber + 1;
+    rowNumber <= worksheet.actualRowCount;
+    rowNumber += 1
+  ) {
+    ensureNotCancelled(options.isCancelled);
+    const row = worksheet.getRow(rowNumber);
+    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
+    if (values.every((value) => value === null)) continue;
+    builder.addRow(values);
+    rowCount += 1;
+    if (rowNumber % 1_000 === 0) {
+      report(Math.min(possibleRows, rowNumber - headerRowNumber));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+  report(possibleRows, true);
+  return { profiles: builder.finish(rowCount), rowCount };
+}
+
+function progressReporter(
+  onProgress: FullProfileOptions['onProgress'],
+  totalRows: number | null
+): (processedRows: number, force?: boolean) => void {
+  let lastReported = -1;
+  let lastTime = 0;
+  return (processedRows, force = false) => {
+    const now = Date.now();
+    if (!force && processedRows === lastReported) return;
+    if (!force && now - lastTime < 150) return;
+    lastReported = processedRows;
+    lastTime = now;
+    onProgress?.(processedRows, totalRows);
+  };
 }
 
 async function readDelimited(
@@ -196,7 +422,13 @@ async function readParquet(
   const allColumns = parquetSchema(metadata).children.map((child) => child.element.name);
   const columns = allColumns.slice(0, maxColumns);
   const effectiveLimit = previewRowLimit(limit, columns.length);
-  validateParquetPreviewSize(metadata.row_groups, new Set(columns), effectiveLimit);
+  validateParquetExpandedSize(
+    metadata.row_groups,
+    new Set(columns),
+    effectiveLimit,
+    MAX_PARQUET_PREVIEW_EXPANDED_BYTES,
+    'Parquet preview exceeds the 256 MB uncompressed safety limit. Reduce dataPeek.maxColumns.'
+  );
   const rowEnd = Number(
     totalRowsBigInt < BigInt(effectiveLimit) ? totalRowsBigInt : BigInt(effectiveLimit)
   );
@@ -451,7 +683,8 @@ function makePreview(input: {
     truncated: input.truncated,
     truncation,
     qualityWarnings: buildQualityWarnings(profiles, input.rows, truncation),
-    profileScope: 'preview',
+    profileScope: input.truncated ? 'preview' : 'full',
+    profiledRowCount: input.rows.length,
     parsing: input.parsing,
     sheet: input.sheet,
     sheets: input.sheets
@@ -473,7 +706,7 @@ function previewRowLimit(requestedRows: number, columnCount: number): number {
   return Math.min(requestedRows, cellLimitedRows);
 }
 
-function validateParquetPreviewSize(
+function validateParquetExpandedSize(
   rowGroups: Array<{
     num_rows: bigint;
     columns: Array<{
@@ -481,7 +714,9 @@ function validateParquetPreviewSize(
     }>;
   }>,
   selectedColumns: Set<string>,
-  rowLimit: number
+  rowLimit: number,
+  maximumBytes: bigint,
+  errorMessage: string
 ): void {
   let rowsCovered = 0n;
   let expandedBytes = 0n;
@@ -497,11 +732,7 @@ function validateParquetPreviewSize(
           throw new Error('Invalid Parquet metadata: negative column size.');
         }
         expandedBytes += metadata.total_uncompressed_size;
-        if (expandedBytes > MAX_PARQUET_PREVIEW_EXPANDED_BYTES) {
-          throw new Error(
-            'Parquet preview exceeds the 256 MB uncompressed safety limit. Reduce dataPeek.maxColumns.'
-          );
-        }
+        if (expandedBytes > maximumBytes) throw new Error(errorMessage);
       }
     }
     rowsCovered += rowGroup.num_rows;

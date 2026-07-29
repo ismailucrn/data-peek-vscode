@@ -113,6 +113,13 @@
           "minimum": 10,
           "maximum": 2000,
           "description": "Maximum number of columns loaded into an interactive preview."
+        },
+        "dataPeek.maxProfileScanSizeMB": {
+          "type": "number",
+          "default": 1024,
+          "minimum": 64,
+          "maximum": 8192,
+          "description": "Maximum source or selected uncompressed Parquet data scanned for full-data column profiles, in MB."
         }
       }
     }

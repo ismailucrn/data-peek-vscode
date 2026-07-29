@@ -164,6 +164,10 @@ let virtualPinnedWidth = 54;
 let renderedRows: VirtualRange = { start: -1, end: -1 };
 let renderedColumns = '';
 let currentDatasetSignature = '';
+let profileActivity:
+  | { state: 'idle' }
+  | { state: 'running'; processedRows: number; totalRows: number | null }
+  | { state: 'error'; message: string } = { state: 'idle' };
 
 elements.reload.addEventListener('click', () => vscode.postMessage({ type: 'reload' }));
 elements.parsingDelimiter.addEventListener('change', renderCustomDelimiterField);
@@ -260,6 +264,18 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
     setError(message.message);
   } else if (message.type === 'dataset') {
     receiveDataset(message.payload);
+  } else if (message.type === 'profileProgress') {
+    profileActivity = {
+      state: 'running',
+      processedRows: message.processedRows,
+      totalRows: message.totalRows
+    };
+    renderProfileNote();
+  } else if (message.type === 'profiles') {
+    receiveFullProfiles(message.payload);
+  } else if (message.type === 'profileError') {
+    profileActivity = { state: 'error', message: message.message };
+    renderProfileNote();
   } else {
     if (message.operation === 'parsing') {
       setParsingPending(false);
@@ -284,6 +300,7 @@ function setError(message: string): void {
 
 function receiveDataset(nextDataset: DatasetPreview): void {
   dataset = nextDataset;
+  profileActivity = { state: 'idle' };
   const signature = datasetSignature(nextDataset);
   currentDatasetSignature = signature;
   const persisted = vscode.getState();
@@ -303,6 +320,21 @@ function receiveDataset(nextDataset: DatasetPreview): void {
   if (restoredSelection) {
     window.requestAnimationFrame(() => selectCell(restoredSelection));
   }
+}
+
+function receiveFullProfiles(result: {
+  profiles: DatasetPreview['profiles'];
+  rowCount: number;
+}): void {
+  if (!dataset || result.profiles.length !== dataset.columns.length) return;
+  dataset = {
+    ...dataset,
+    profiles: result.profiles,
+    profileScope: 'full',
+    profiledRowCount: result.rowCount
+  };
+  profileActivity = { state: 'idle' };
+  renderTable();
 }
 
 function renderDataset(): void {
@@ -501,8 +533,7 @@ function renderProfiles(): void {
   elements.profiles.classList.toggle('hidden', collapsed);
   elements.toggleProfiles.textContent = collapsed ? 'Expand' : 'Collapse';
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
-  elements.profilesNote.textContent =
-    `Based on preview · ${matchedColumns.length} of ${virtualColumnOrder.length} visible`;
+  renderProfileNote(matchedColumns.length);
   if (collapsed) return;
 
   const contentWidth = virtualPinnedWidth + virtualScrollingWidths.reduce(
@@ -547,13 +578,16 @@ function renderProfiles(): void {
     card.appendChild(heading);
 
     const stats = document.createElement('dl');
+    const approximate = new Set(profile.approximateMetrics ?? []);
     addStat(stats, 'Non-null', formatNumber(profile.nonNull));
     addStat(stats, 'Missing', formatNumber(profile.missing));
-    addStat(stats, 'Distinct', formatNumber(profile.distinct));
+    addStat(stats, 'Distinct', formatNumber(profile.distinct), approximate.has('distinct'));
     addStat(stats, 'Missing %', formatPercent(profile.missingRatio));
-    addStat(stats, 'Unique %', formatPercent(profile.uniqueRatio));
+    addStat(stats, 'Unique %', formatPercent(profile.uniqueRatio), approximate.has('distinct'));
     if (profile.mean !== undefined) addStat(stats, 'Mean', formatCompact(profile.mean));
-    if (profile.median !== undefined) addStat(stats, 'Median', formatCompact(profile.median));
+    if (profile.median !== undefined) {
+      addStat(stats, 'Median', formatCompact(profile.median), approximate.has('median'));
+    }
     if (profile.standardDeviation !== undefined) {
       addStat(stats, 'Population σ', formatCompact(profile.standardDeviation));
     }
@@ -573,8 +607,12 @@ function renderProfiles(): void {
       details.addEventListener('toggle', () => {
         if (!details.open || detailsRendered) return;
         detailsRendered = true;
-        if (profile.histogram?.length) renderHistogram(details, profile.histogram);
-        if (profile.topValues.length) renderTopValues(details, profile.topValues);
+        if (profile.histogram?.length) {
+          renderHistogram(details, profile.histogram, approximate.has('histogram'));
+        }
+        if (profile.topValues.length) {
+          renderTopValues(details, profile.topValues, approximate.has('topValues'));
+        }
       });
       card.appendChild(details);
     }
@@ -606,12 +644,13 @@ function renderQualityWarnings(): void {
 
 function renderHistogram(
   container: HTMLElement,
-  bins: NonNullable<DatasetPreview['profiles'][number]['histogram']>
+  bins: NonNullable<DatasetPreview['profiles'][number]['histogram']>,
+  approximate: boolean
 ): void {
   const section = document.createElement('section');
   section.className = 'profile-distribution';
   const heading = document.createElement('strong');
-  heading.textContent = 'Histogram';
+  heading.textContent = approximate ? 'Histogram (estimated)' : 'Histogram';
   section.appendChild(heading);
   const maximum = Math.max(...bins.map((bin) => bin.count), 1);
   for (const bin of bins) {
@@ -630,7 +669,7 @@ function renderHistogram(
     bar.style.width = `${(bin.count / maximum) * 100}%`;
     track.appendChild(bar);
     const count = document.createElement('span');
-    count.textContent = formatNumber(bin.count);
+    count.textContent = `${approximate ? '≈' : ''}${formatNumber(bin.count)}`;
     row.append(label, track, count);
     section.appendChild(row);
   }
@@ -639,12 +678,13 @@ function renderHistogram(
 
 function renderTopValues(
   container: HTMLElement,
-  values: DatasetPreview['profiles'][number]['topValues']
+  values: DatasetPreview['profiles'][number]['topValues'],
+  approximate: boolean
 ): void {
   const section = document.createElement('section');
   section.className = 'profile-distribution';
   const heading = document.createElement('strong');
-  heading.textContent = 'Top values';
+  heading.textContent = approximate ? 'Top values (estimated)' : 'Top values';
   section.appendChild(heading);
   for (const item of values) {
     const row = document.createElement('div');
@@ -653,20 +693,57 @@ function renderTopValues(
     value.textContent = item.value === null ? 'null' : String(item.value);
     value.title = value.textContent;
     const count = document.createElement('span');
-    count.textContent = formatNumber(item.count);
+    count.textContent = `${approximate ? '≈' : ''}${formatNumber(item.count)}`;
     row.append(value, count);
     section.appendChild(row);
   }
   container.appendChild(section);
 }
 
-function addStat(list: HTMLElement, label: string, value: string): void {
+function addStat(list: HTMLElement, label: string, value: string, approximate = false): void {
   const term = document.createElement('dt');
   term.textContent = label;
   const definition = document.createElement('dd');
-  definition.textContent = value;
-  definition.title = value;
+  definition.textContent = `${approximate ? '≈' : ''}${value}`;
+  definition.title = approximate ? `Estimated: ${value}` : value;
   list.append(term, definition);
+}
+
+function renderProfileNote(matchedColumns?: number): void {
+  if (!dataset) return;
+  const visible = matchedColumns ?? virtualColumnOrder.filter((columnIndex) =>
+    dataset?.profiles[columnIndex]?.name
+      .toLowerCase()
+      .includes((tableState.ui?.profileQuery ?? '').trim().toLowerCase())
+  ).length;
+  const columnSummary = `${visible} of ${virtualColumnOrder.length} visible`;
+  if (dataset.profileScope === 'full') {
+    const estimated = dataset.profiles.some(
+      (profile) => (profile.approximateMetrics?.length ?? 0) > 0
+    );
+    elements.profilesNote.textContent =
+      `Full dataset · ${formatNumber(dataset.profiledRowCount)} rows · ${columnSummary}` +
+      (estimated ? ' · ≈ estimated' : '');
+    return;
+  }
+  if (profileActivity.state === 'running') {
+    const progress =
+      profileActivity.totalRows && profileActivity.totalRows > 0
+        ? ` ${formatPercent(
+            Math.min(1, profileActivity.processedRows / profileActivity.totalRows)
+          )}`
+        : ` ${formatNumber(profileActivity.processedRows)} rows`;
+    elements.profilesNote.textContent =
+      `Preview shown · Profiling full dataset…${progress} · ${columnSummary}`;
+    return;
+  }
+  if (profileActivity.state === 'error') {
+    elements.profilesNote.textContent =
+      `Preview only · Full profile unavailable: ${profileActivity.message}`;
+    return;
+  }
+  elements.profilesNote.textContent =
+    `Based on preview · ${formatNumber(dataset.profiledRowCount)} rows · ${columnSummary}`;
 }
 
 function renderTable(): void {
@@ -1413,6 +1490,28 @@ function isHostMessage(value: unknown): value is HostToWebviewMessage {
   const message = value as Record<string, unknown>;
   if (message.type === 'loading') return true;
   if (message.type === 'error') return typeof message.message === 'string';
+  if (message.type === 'profileProgress') {
+    return (
+      typeof message.processedRows === 'number' &&
+      Number.isFinite(message.processedRows) &&
+      message.processedRows >= 0 &&
+      (message.totalRows === null ||
+        (typeof message.totalRows === 'number' &&
+          Number.isFinite(message.totalRows) &&
+          message.totalRows >= 0))
+    );
+  }
+  if (message.type === 'profileError') {
+    return typeof message.message === 'string' && message.message.length <= 256;
+  }
+  if (message.type === 'profiles') {
+    return (
+      typeof message.payload === 'object' &&
+      message.payload !== null &&
+      Array.isArray((message.payload as Record<string, unknown>).profiles) &&
+      typeof (message.payload as Record<string, unknown>).rowCount === 'number'
+    );
+  }
   if (message.type === 'operationResult') {
     return (
       (message.operation === 'copy' || message.operation === 'parsing') &&

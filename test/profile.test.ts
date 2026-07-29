@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildQualityWarnings } from '../src/dataQuality';
-import { buildProfiles, isTruncatedCell, normalizeCell } from '../src/profile';
+import {
+  StreamingProfileBuilder,
+  buildProfiles,
+  isTruncatedCell,
+  normalizeCell
+} from '../src/profile';
 import { SerializableCell } from '../src/types';
 
 test('builds deterministic numeric distributions from preview values', () => {
@@ -63,6 +68,31 @@ test('profiles text lengths, top values and chronological date ranges', () => {
   assert.deepEqual(profiles[0].topValues[0], { value: 'x', count: 2 });
   assert.equal(profiles[1].min, '2023-01-15');
   assert.equal(profiles[1].max, '2024-12-01');
+});
+
+test('streams full-data profiles with exact bounded metrics and marked estimates', () => {
+  const builder = new StreamingProfileBuilder(['value', 'group']);
+  for (let index = 0; index < 2_000; index += 1) {
+    builder.addRow([index, index < 1_500 ? 'early' : 'late']);
+  }
+  const [numeric, group] = builder.finish(2_000);
+  assert.equal(numeric.nonNull, 2_000);
+  assert.equal(numeric.min, 0);
+  assert.equal(numeric.max, 1_999);
+  assert.equal(numeric.mean, 999.5);
+  assert.ok(Math.abs(numeric.distinct - 2_000) < 300);
+  assert.deepEqual(
+    new Set(numeric.approximateMetrics),
+    new Set(['distinct', 'topValues', 'median', 'histogram'])
+  );
+  assert.equal(
+    numeric.histogram?.reduce((total, bin) => total + bin.count, 0),
+    2_000
+  );
+  assert.equal(group.distinct, 2);
+  assert.equal(group.topValues[0]?.value, 'early');
+  assert.equal(group.topValues[0]?.count, 1_500);
+  assert.equal(group.approximateMetrics, undefined);
 });
 
 test('creates preview quality warnings for columns, duplicates and truncation', () => {

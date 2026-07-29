@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import ExcelJS from 'exceljs';
-import { loadPreview } from '../src/dataReader';
+import { loadFullProfiles, loadPreview } from '../src/dataReader';
 import { validateExcelArchive } from '../src/excelArchive';
 import { defaultDelimitedParsingSettings } from '../src/parsing';
 import { buildProfiles, normalizeCell } from '../src/profile';
@@ -13,7 +13,8 @@ const options = {
   limit: 100,
   maxExcelFileSizeMB: 20,
   maxExcelExpandedSizeMB: 50,
-  maxColumns: 500
+  maxColumns: 500,
+  maxProfileScanSizeMB: 1024
 };
 
 test('normalizes values and builds numeric profiles', () => {
@@ -110,6 +111,35 @@ test('reads a quoted CSV preview and reports truncation', async () => {
     assert.equal(preview.truncation.rows, true);
     assert.equal(preview.totalRows, null);
     assert.equal(preview.profiles[1].type, 'number');
+    assert.equal(preview.profileScope, 'preview');
+    assert.equal(preview.profiledRowCount, 100);
+  });
+});
+
+test('profiles every CSV row after returning a bounded preview', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'classes.csv');
+    const records = Array.from(
+      { length: 750 },
+      (_unused, index) => `${index},${index < 500 ? 'early' : 'late'}`
+    );
+    await fs.writeFile(filePath, `id,class\n${records.join('\n')}\n`, 'utf8');
+
+    const preview = await loadPreview(filePath, options);
+    assert.equal(preview.rows.length, 100);
+    assert.equal(preview.profiles[1].distinct, 1);
+
+    const full = await loadFullProfiles(filePath, {
+      ...options,
+      columns: preview.columns,
+      parsing: preview.parsing?.applied
+    });
+    assert.equal(full.rowCount, 750);
+    assert.equal(full.profiles[1].distinct, 2);
+    assert.deepEqual(full.profiles[1].topValues, [
+      { value: 'early', count: 500 },
+      { value: 'late', count: 250 }
+    ]);
   });
 });
 
@@ -226,6 +256,14 @@ test('stops preview work when the editor load is cancelled', async () => {
       loadPreview(filePath, { ...options, isCancelled: () => true }),
       /Preview loading was cancelled/
     );
+    await assert.rejects(
+      loadFullProfiles(filePath, {
+        ...options,
+        columns: ['name'],
+        isCancelled: () => true
+      }),
+      /Preview loading was cancelled/
+    );
   });
 });
 
@@ -243,7 +281,8 @@ test('reports cells shortened by the normalization safety limit', async () => {
       ),
       true
     );
-    assert.equal(preview.profileScope, 'preview');
+    assert.equal(preview.profileScope, 'full');
+    assert.equal(preview.profiledRowCount, 1);
   });
 });
 
@@ -272,6 +311,13 @@ test('reads worksheets from an Excel workbook', async () => {
     assert.deepEqual(preview.sheets, ['People', 'Scores']);
     assert.deepEqual(preview.columns, ['team', 'score']);
     assert.deepEqual(preview.rows, [['Blue', 10]]);
+    const full = await loadFullProfiles(filePath, {
+      ...options,
+      columns: preview.columns,
+      sheet: 'Scores'
+    });
+    assert.equal(full.rowCount, 1);
+    assert.equal(full.profiles[1].mean, 10);
   });
 });
 
@@ -309,6 +355,67 @@ test('reads a generated Parquet file', async () => {
     assert.equal(preview.totalRows, 3);
     assert.deepEqual(preview.columns, ['event', 'duration']);
     assert.deepEqual(preview.rows[1], ['click', 2.25]);
+    const full = await loadFullProfiles(filePath, {
+      ...options,
+      columns: preview.columns
+    });
+    assert.equal(full.rowCount, 3);
+    assert.equal(full.profiles[0].distinct, 3);
+    assert.equal(full.profiles[1].mean, 2.5);
+  });
+});
+
+test('profiles Parquet values beyond the bounded preview', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'skewed.parquet');
+    const { parquetWriteFile } = await import('hyparquet-writer');
+    await parquetWriteFile({
+      filename: filePath,
+      columnData: [
+        {
+          name: 'class',
+          data: Array.from({ length: 150 }, (_unused, index) => index < 100 ? 'early' : 'late'),
+          type: 'STRING'
+        },
+        {
+          name: 'value',
+          data: Array.from({ length: 150 }, (_unused, index) => index),
+          type: 'INT32'
+        }
+      ]
+    });
+
+    const preview = await loadPreview(filePath, options);
+    assert.equal(preview.rows.length, 100);
+    assert.equal(preview.profiles[0].distinct, 1);
+
+    const full = await loadFullProfiles(filePath, {
+      ...options,
+      columns: preview.columns
+    });
+    assert.equal(full.rowCount, 150);
+    assert.equal(full.profiles[0].distinct, 2);
+    assert.deepEqual(full.profiles[0].topValues, [
+      { value: 'early', count: 100 },
+      { value: 'late', count: 50 }
+    ]);
+    assert.equal(full.profiles[1].max, 149);
+  });
+});
+
+test('rejects full profiling beyond the configured scan boundary', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'oversized.csv');
+    await fs.writeFile(filePath, 'value\n', 'utf8');
+    await fs.truncate(filePath, 65 * 1024 * 1024);
+    await assert.rejects(
+      loadFullProfiles(filePath, {
+        ...options,
+        maxProfileScanSizeMB: 64,
+        columns: ['value']
+      }),
+      /Full-data profiling is limited to 64.0 MB/
+    );
   });
 });
 

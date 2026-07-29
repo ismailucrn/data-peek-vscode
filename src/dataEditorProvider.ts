@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import * as vscode from 'vscode';
 import { copyCellText, copyRowAsTsv } from './clipboard';
 import { isSupportedFile, loadPreview } from './dataReader';
@@ -7,6 +8,7 @@ import { validateDelimitedParsingSettings } from './parsing';
 import {
   DatasetPreview,
   DelimitedParsingSettings,
+  FullProfileResult,
   WebviewToHostMessage
 } from './types';
 
@@ -47,6 +49,106 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
     let readyReceived = false;
     let latestPreview: DatasetPreview | undefined;
     let parsingSettings: DelimitedParsingSettings | undefined;
+    let profileGeneration = 0;
+    let profileWorker: Worker | undefined;
+
+    const stopProfileWorker = (): void => {
+      const worker = profileWorker;
+      profileWorker = undefined;
+      if (worker) void worker.terminate();
+    };
+
+    const startFullProfile = (
+      preview: DatasetPreview,
+      generation: number,
+      configuration: vscode.WorkspaceConfiguration
+    ): void => {
+      if (preview.profileScope === 'full' || preview.columns.length === 0) return;
+      stopProfileWorker();
+      void webviewPanel.webview.postMessage({
+        type: 'profileProgress',
+        processedRows: 0,
+        totalRows: preview.totalRows
+      });
+      const worker = new Worker(
+        vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'profileWorker.js').fsPath,
+        {
+          workerData: {
+            filePath: document.uri.fsPath,
+            limit: configuration.get<number>('previewRows', 2000),
+            maxExcelFileSizeMB: configuration.get<number>('maxExcelFileSizeMB', 100),
+            maxExcelExpandedSizeMB: configuration.get<number>('maxExcelExpandedSizeMB', 250),
+            maxProfileScanSizeMB: configuration.get<number>('maxProfileScanSizeMB', 1024),
+            maxColumns: configuration.get<number>('maxColumns', 500),
+            columns: preview.columns,
+            sheet: preview.sheet,
+            parsing: preview.parsing?.applied ?? parsingSettings
+          }
+        }
+      );
+      profileWorker = worker;
+      let settled = false;
+      worker.on('message', (message: unknown) => {
+        if (
+          settled ||
+          disposed ||
+          cancellationToken.isCancellationRequested ||
+          generation !== profileGeneration ||
+          !isProfileWorkerMessage(message)
+        ) return;
+        if (message.type === 'progress') {
+          void webviewPanel.webview.postMessage({
+            type: 'profileProgress',
+            processedRows: message.processedRows,
+            totalRows: message.totalRows
+          });
+          return;
+        }
+        settled = true;
+        if (message.type === 'result') {
+          latestPreview = {
+            ...preview,
+            profiles: message.payload.profiles,
+            profileScope: 'full',
+            profiledRowCount: message.payload.rowCount
+          };
+          void webviewPanel.webview.postMessage({ type: 'profiles', payload: message.payload });
+        } else {
+          void webviewPanel.webview.postMessage({
+            type: 'profileError',
+            message: message.message
+          });
+        }
+      });
+      worker.on('error', (error) => {
+        if (
+          settled ||
+          disposed ||
+          cancellationToken.isCancellationRequested ||
+          generation !== profileGeneration
+        ) return;
+        settled = true;
+        void webviewPanel.webview.postMessage({
+          type: 'profileError',
+          message: (error instanceof Error ? error.message : String(error)).slice(0, 256)
+        });
+      });
+      worker.on('exit', (code) => {
+        if (profileWorker === worker) profileWorker = undefined;
+        if (
+          settled ||
+          code === 0 ||
+          disposed ||
+          cancellationToken.isCancellationRequested ||
+          generation !== profileGeneration
+        ) return;
+        settled = true;
+        void webviewPanel.webview.postMessage({
+          type: 'profileError',
+          message: `Full-data profiling stopped unexpectedly (worker exit ${code}).`
+        });
+      });
+    };
 
     const refresh = async (operation?: 'parsing'): Promise<boolean> => {
       if (disposed || cancellationToken.isCancellationRequested) return false;
@@ -64,6 +166,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         return false;
       }
       loading = true;
+      stopProfileWorker();
+      const generation = ++profileGeneration;
       if (!operation) void webviewPanel.webview.postMessage({ type: 'loading' });
       let succeeded = false;
       try {
@@ -82,6 +186,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         availableSheets = new Set(preview.sheets ?? []);
         latestPreview = preview;
         await webviewPanel.webview.postMessage({ type: 'dataset', payload: preview });
+        startFullProfile(preview, generation, configuration);
         if (operation) {
           await postOperationResult(
             webviewPanel.webview,
@@ -164,6 +269,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
     webviewPanel.onDidDispose(() => {
       disposed = true;
       queued = false;
+      profileGeneration += 1;
+      stopProfileWorker();
       messageSubscription.dispose();
     });
 
@@ -407,6 +514,40 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
 </body>
 </html>`;
   }
+}
+
+type ProfileWorkerMessage =
+  | { type: 'progress'; processedRows: number; totalRows: number | null }
+  | { type: 'result'; payload: FullProfileResult }
+  | { type: 'error'; message: string };
+
+function isProfileWorkerMessage(value: unknown): value is ProfileWorkerMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Record<string, unknown>;
+  if (message.type === 'progress') {
+    return (
+      typeof message.processedRows === 'number' &&
+      Number.isFinite(message.processedRows) &&
+      message.processedRows >= 0 &&
+      (message.totalRows === null ||
+        (typeof message.totalRows === 'number' &&
+          Number.isFinite(message.totalRows) &&
+          message.totalRows >= 0))
+    );
+  }
+  if (message.type === 'error') {
+    return typeof message.message === 'string' && message.message.length <= 256;
+  }
+  if (message.type === 'result' && message.payload && typeof message.payload === 'object') {
+    const payload = message.payload as Record<string, unknown>;
+    return (
+      Array.isArray(payload.profiles) &&
+      typeof payload.rowCount === 'number' &&
+      Number.isFinite(payload.rowCount) &&
+      payload.rowCount >= 0
+    );
+  }
+  return false;
 }
 
 async function postOperationResult(

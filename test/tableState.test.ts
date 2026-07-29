@@ -44,7 +44,8 @@ const dataset: DatasetPreview = {
   truncated: false,
   truncation: { rows: false, columns: false, cells: 0 },
   qualityWarnings: [],
-  profileScope: 'preview'
+  profileScope: 'preview',
+  profiledRowCount: 4
 };
 
 test('combines global search and column filters with AND semantics', () => {

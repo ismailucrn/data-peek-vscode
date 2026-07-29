@@ -4,5 +4,6 @@ import './dataReader.test';
 import './messages.test';
 import './parsing.test';
 import './profile.test';
+import './profileWorker.test';
 import './tableLayout.test';
 import './tableState.test';

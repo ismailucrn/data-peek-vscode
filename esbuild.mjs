@@ -14,6 +14,16 @@ const builds = [
     logLevel: 'info'
   },
   {
+    entryPoints: ['src/profileWorker.ts'],
+    bundle: true,
+    outfile: 'dist/profileWorker.js',
+    format: 'cjs',
+    platform: 'node',
+    target: 'node20',
+    sourcemap: true,
+    logLevel: 'info'
+  },
+  {
     entryPoints: ['media/main.ts'],
     bundle: true,
     outfile: 'dist/webview.js',

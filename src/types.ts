@@ -78,6 +78,12 @@ export interface ColumnProfile {
     value: SerializableCell;
     count: number;
   }>;
+  approximateMetrics?: Array<'distinct' | 'median' | 'histogram' | 'topValues'>;
+}
+
+export interface FullProfileResult {
+  profiles: ColumnProfile[];
+  rowCount: number;
 }
 
 export type QualityWarningCode =
@@ -143,7 +149,8 @@ export interface DatasetPreview {
   truncated: boolean;
   truncation: TruncationInfo;
   qualityWarnings: QualityWarning[];
-  profileScope: 'preview';
+  profileScope: 'preview' | 'full';
+  profiledRowCount: number;
   parsing?: DelimitedParsingMetadata;
   sheet?: string;
   sheets?: string[];
@@ -161,6 +168,9 @@ export type WebviewToHostMessage =
 export type HostToWebviewMessage =
   | { type: 'loading' }
   | { type: 'dataset'; payload: DatasetPreview }
+  | { type: 'profileProgress'; processedRows: number; totalRows: number | null }
+  | { type: 'profiles'; payload: FullProfileResult }
+  | { type: 'profileError'; message: string }
   | { type: 'error'; message: string }
   | {
       type: 'operationResult';
@@ -177,4 +187,10 @@ export interface PreviewOptions {
   sheet?: string;
   parsing?: unknown;
   isCancelled?: () => boolean;
+}
+
+export interface FullProfileOptions extends PreviewOptions {
+  columns: string[];
+  maxProfileScanSizeMB: number;
+  onProgress?: (processedRows: number, totalRows: number | null) => void;
 }
