@@ -512,7 +512,7 @@ function renderProfiles(): void {
     dataset?.profiles[columnIndex]?.name.toLowerCase().includes(query)
   );
   elements.profiles.classList.toggle('hidden', collapsed);
-  elements.toggleProfiles.textContent = collapsed ? 'Expand' : 'Collapse';
+  elements.toggleProfiles.textContent = collapsed ? 'Show profiles' : 'Hide profiles';
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
   renderProfileNote(matchedColumns.length);
   if (collapsed) return;
