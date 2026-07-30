@@ -428,8 +428,9 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
               <div id="profile-search-field" class="profile-search-field">
                 <label for="profile-search">Go to column</label>
                 <div class="column-search-combobox">
-                  <input id="profile-search" type="search" placeholder="Search column names…" role="combobox" aria-autocomplete="list" aria-controls="column-search-results" aria-expanded="false" maxlength="200" autocomplete="off">
+                  <input id="profile-search" type="search" placeholder="Search column names…" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-controls="column-search-results" aria-describedby="column-search-status" aria-expanded="false" maxlength="200" autocomplete="off">
                   <div id="column-search-results" class="column-search-results hidden" role="listbox" aria-label="Matching columns"></div>
+                  <span id="column-search-status" class="visually-hidden" role="status" aria-live="polite"></span>
                 </div>
               </div>
             </div>

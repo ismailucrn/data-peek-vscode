@@ -9,6 +9,7 @@ Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TS
 - Search the loaded preview and combine multiple type-aware column filters.
 - Sort columns and scroll large tables with two-axis virtualization.
 - Resize columns.
+- Find matching column names and jump directly to the selected table column.
 - Navigate cells with the keyboard and inspect the complete selected value.
 - Copy a cell, row, or column name to the clipboard.
 - View background-calculated full-data profiles for numeric, boolean, date, text, mixed, and empty columns.
@@ -29,7 +30,7 @@ The bounded table preview appears first. When the source has more rows, column p
 
 1. Right-click a supported file in VS Code.
 2. Select **Open with Data Peek**.
-3. Search, filter, sort, or adjust the column layout in the preview.
+3. Search, filter, sort, jump to a column, or adjust column widths in the preview.
 4. Copy the selected cell, row, or column name when needed.
 
 ## Settings

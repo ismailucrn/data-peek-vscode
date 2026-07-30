@@ -115,6 +115,7 @@ const elements = {
   profileSearchField: requiredElement<HTMLElement>('profile-search-field'),
   profileSearch: requiredElement<HTMLInputElement>('profile-search'),
   columnSearchResults: requiredElement<HTMLElement>('column-search-results'),
+  columnSearchStatus: requiredElement<HTMLElement>('column-search-status'),
   toggleProfiles: requiredElement<HTMLButtonElement>('toggle-profiles'),
   tableHead: requiredElement<HTMLElement>('table-head'),
   tableBody: requiredElement<HTMLElement>('table-body'),
@@ -751,9 +752,10 @@ function renderColumnSearchResults(): void {
     closeColumnSearchResults();
     return;
   }
+  const currentDataset = dataset;
   const query = elements.profileSearch.value.slice(0, 200);
   if (elements.profileSearch.value !== query) elements.profileSearch.value = query;
-  const result = matchColumnNames(dataset.columns, query);
+  const result = matchColumnNames(currentDataset.columns, query);
   columnSearchMatches = result.matches;
   activeColumnMatch = result.matches.length > 0 ? 0 : -1;
   elements.columnSearchResults.replaceChildren();
@@ -768,6 +770,7 @@ function renderColumnSearchResults(): void {
     empty.className = 'column-search-empty';
     empty.textContent = 'No matching columns';
     fragment.appendChild(empty);
+    elements.columnSearchStatus.textContent = 'No matching columns.';
   } else {
     result.matches.forEach((columnIndex, matchIndex) => {
       const option = document.createElement('button');
@@ -777,13 +780,16 @@ function renderColumnSearchResults(): void {
       option.dataset.matchIndex = String(matchIndex);
       option.setAttribute('role', 'option');
       option.setAttribute('aria-selected', String(matchIndex === activeColumnMatch));
+      option.setAttribute('aria-posinset', String(matchIndex + 1));
+      option.setAttribute('aria-setsize', String(result.total));
       option.tabIndex = -1;
       const name = document.createElement('span');
       name.className = 'column-search-name';
-      appendHighlightedText(name, dataset?.columns[columnIndex] ?? '', query);
+      name.title = currentDataset.columns[columnIndex];
+      appendHighlightedText(name, currentDataset.columns[columnIndex], query);
       const type = document.createElement('span');
       type.className = 'column-search-type';
-      type.textContent = dataset?.profiles[columnIndex]?.type ?? 'text';
+      type.textContent = currentDataset.profiles[columnIndex]?.type ?? 'text';
       option.append(name, type);
       option.addEventListener('click', () => goToColumn(columnIndex));
       fragment.appendChild(option);
@@ -795,6 +801,9 @@ function renderColumnSearchResults(): void {
         `${formatNumber(result.total - result.matches.length)} more matching columns`;
       fragment.appendChild(remaining);
     }
+    elements.columnSearchStatus.textContent =
+      `${formatNumber(result.total)} matching ${result.total === 1 ? 'column' : 'columns'}. ` +
+      'Use the up and down arrow keys to choose, then press Enter.';
   }
   elements.columnSearchResults.appendChild(fragment);
   elements.columnSearchResults.classList.remove('hidden');
@@ -848,6 +857,7 @@ function closeColumnSearchResults(): void {
   activeColumnMatch = -1;
   elements.columnSearchResults.replaceChildren();
   elements.columnSearchResults.classList.add('hidden');
+  elements.columnSearchStatus.textContent = '';
   elements.profileSearch.setAttribute('aria-expanded', 'false');
   elements.profileSearch.removeAttribute('aria-activedescendant');
 }
@@ -867,7 +877,8 @@ function appendHighlightedText(container: HTMLElement, value: string, query: str
 
 function goToColumn(columnIndex: number): void {
   if (!dataset || columnIndex < 0 || columnIndex >= dataset.columns.length) return;
-  elements.profileSearch.value = dataset.columns[columnIndex];
+  const columnName = dataset.columns[columnIndex];
+  elements.profileSearch.value = columnName;
   closeColumnSearchResults();
   const viewportWidth = Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH);
   const target = centeredColumnScrollOffset(
@@ -882,6 +893,7 @@ function goToColumn(columnIndex: number): void {
     block: 'nearest',
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
   });
+  elements.columnSearchStatus.textContent = `Moved to column ${columnName}.`;
   window.requestAnimationFrame(() => highlightColumnHeader(columnIndex));
 }
 
