@@ -22,8 +22,7 @@ import {
   calculateVirtualRange,
   clampColumnWidth,
   estimateColumnWidth,
-  navigateSelection,
-  visibleColumnOrder
+  navigateSelection
 } from '../src/tableLayout';
 import {
   CellSelection,
@@ -76,6 +75,7 @@ const PERCENT_FORMATTER = new Intl.NumberFormat(undefined, {
   style: 'percent',
   maximumFractionDigits: 1
 });
+const ROW_INDEX_WIDTH = 54;
 
 const vscode = acquireVsCodeApi<PersistedState>();
 const elements = {
@@ -88,10 +88,6 @@ const elements = {
   search: requiredElement<HTMLInputElement>('search'),
   sheetWrap: requiredElement<HTMLElement>('sheet-wrap'),
   sheet: requiredElement<HTMLSelectElement>('sheet'),
-  columnsMenuToggle: requiredElement<HTMLButtonElement>('columns-menu-toggle'),
-  columnsMenu: requiredElement<HTMLElement>('columns-menu'),
-  columnsList: requiredElement<HTMLElement>('columns-list'),
-  showAllColumns: requiredElement<HTMLButtonElement>('show-all-columns'),
   operationStatus: requiredElement<HTMLElement>('operation-status'),
   parsingSection: requiredElement<HTMLElement>('parsing-section'),
   parsingDetected: requiredElement<HTMLElement>('parsing-detected'),
@@ -157,10 +153,7 @@ let resizeFrame = 0;
 let virtualRows: IndexedRow[] = [];
 let virtualRowIndexes: number[] = [];
 let virtualColumnOrder: number[] = [];
-let virtualPinnedColumns: number[] = [];
-let virtualScrollingColumns: number[] = [];
-let virtualScrollingWidths: number[] = [];
-let virtualPinnedWidth = 54;
+let virtualColumnWidths: number[] = [];
 let renderedRows: VirtualRange = { start: -1, end: -1 };
 let renderedColumns = '';
 let currentDatasetSignature = '';
@@ -212,17 +205,6 @@ window.addEventListener('resize', () => {
     resizeFrame = 0;
     renderTable();
   });
-});
-elements.columnsMenuToggle.addEventListener('click', () => {
-  const opening = elements.columnsMenu.classList.contains('hidden');
-  elements.columnsMenu.classList.toggle('hidden', !opening);
-  elements.columnsMenuToggle.setAttribute('aria-expanded', String(opening));
-  if (opening) renderColumnsMenu();
-});
-elements.showAllColumns.addEventListener('click', () => {
-  updateUi({ hiddenColumns: [] });
-  renderColumnsMenu();
-  renderTable();
 });
 elements.copyCell.addEventListener('click', () => requestCopy('cell'));
 elements.copyRow.addEventListener('click', () => requestCopy('row'));
@@ -346,7 +328,6 @@ function renderDataset(): void {
   renderMetadata();
   renderSheetPicker();
   renderParsingSettings();
-  renderColumnsMenu();
   renderQualityWarnings();
   renderTable();
 }
@@ -536,7 +517,7 @@ function renderProfiles(): void {
   renderProfileNote(matchedColumns.length);
   if (collapsed) return;
 
-  const contentWidth = virtualPinnedWidth + virtualScrollingWidths.reduce(
+  const contentWidth = ROW_INDEX_WIDTH + virtualColumnWidths.reduce(
     (width, columnWidthValue) => width + columnWidthValue,
     0
   );
@@ -557,7 +538,6 @@ function renderProfiles(): void {
       placeholder.className = 'profile-placeholder';
       placeholder.dataset.columnIndex = String(columnIndex);
       applyColumnDimensions(placeholder, columnIndex);
-      if (virtualPinnedColumns.includes(columnIndex)) applyPinnedStyle(placeholder, columnIndex);
       fragment.appendChild(placeholder);
       continue;
     }
@@ -565,7 +545,6 @@ function renderProfiles(): void {
     card.className = 'profile-card';
     card.dataset.columnIndex = String(columnIndex);
     applyColumnDimensions(card, columnIndex);
-    if (virtualPinnedColumns.includes(columnIndex)) applyPinnedStyle(card, columnIndex);
     const heading = document.createElement('div');
     heading.className = 'profile-heading';
     const name = document.createElement('strong');
@@ -778,17 +757,10 @@ function renderTable(): void {
   if (!dataset) return;
   virtualRows = applyTableView(dataset, tableState);
   virtualRowIndexes = virtualRows.map((item) => item.index);
-  virtualColumnOrder = currentColumnOrder();
-  const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
-  virtualPinnedColumns = virtualColumnOrder.filter((columnIndex) => pinned.has(columnIndex));
-  virtualScrollingColumns = virtualColumnOrder.filter((columnIndex) => !pinned.has(columnIndex));
-  virtualScrollingWidths = virtualScrollingColumns.map(columnWidth);
-  virtualPinnedWidth = 54 + virtualPinnedColumns.reduce(
-    (width, columnIndex) => width + columnWidth(columnIndex),
-    0
-  );
+  virtualColumnOrder = Array.from({ length: dataset.columns.length }, (_, index) => index);
+  virtualColumnWidths = virtualColumnOrder.map(columnWidth);
   const selection = ensureValidSelection(virtualRowIndexes, virtualColumnOrder);
-  const contentWidth = virtualPinnedWidth + virtualScrollingWidths.reduce(
+  const contentWidth = ROW_INDEX_WIDTH + virtualColumnWidths.reduce(
     (width, columnWidthValue) => width + columnWidthValue,
     0
   );
@@ -818,13 +790,12 @@ function renderVirtualViewport(): void {
     Math.max(0, elements.tableScroll.clientHeight - VIRTUAL_HEADER_HEIGHT)
   );
   const columnRange = calculateVirtualColumns(
-    virtualScrollingWidths,
+    virtualColumnWidths,
     elements.tableScroll.scrollLeft,
-    Math.max(0, elements.tableScroll.clientWidth - virtualPinnedWidth),
+    Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH),
     VIRTUAL_OVERSCAN
   );
   const columnSignature = [
-    virtualPinnedColumns.join(','),
     columnRange.start,
     columnRange.end,
     columnRange.before,
@@ -847,7 +818,7 @@ function renderVirtualViewport(): void {
 
 function reconcileVirtualRows(rowRange: VirtualRange, columnRange: VirtualColumnRange): void {
   const count = rowRange.end - rowRange.start;
-  const scrollingColumns = virtualScrollingColumns.slice(columnRange.start, columnRange.end);
+  const scrollingColumns = virtualColumnOrder.slice(columnRange.start, columnRange.end);
   while (elements.tableBody.children.length < count) {
     const row = document.createElement('div');
     row.className = 'virtual-row';
@@ -875,21 +846,18 @@ function renderVirtualRow(
   columnRange: VirtualColumnRange,
   scrollingColumns: number[]
 ): void {
-  const required = 1 + virtualPinnedColumns.length + 1 + scrollingColumns.length + 1;
+  const required = scrollingColumns.length + 3;
   while (row.children.length < required) row.appendChild(document.createElement('div'));
   while (row.children.length > required) row.lastElementChild?.remove();
   let childIndex = 0;
   const indexCell = row.children[childIndex++] as HTMLElement;
   resetVirtualElement(indexCell, 'virtual-cell row-index');
-  setElementWidth(indexCell, 54);
+  setElementWidth(indexCell, ROW_INDEX_WIDTH);
   indexCell.textContent = String(item.index + 1);
   indexCell.setAttribute('role', 'rowheader');
-  for (const columnIndex of virtualPinnedColumns) {
-    configureDataCell(row.children[childIndex++] as HTMLElement, item, columnIndex, true);
-  }
   configureSpacer(row.children[childIndex++] as HTMLElement, columnRange.before);
   for (const columnIndex of scrollingColumns) {
-    configureDataCell(row.children[childIndex++] as HTMLElement, item, columnIndex, false);
+    configureDataCell(row.children[childIndex++] as HTMLElement, item, columnIndex);
   }
   configureSpacer(row.children[childIndex] as HTMLElement, columnRange.after);
 }
@@ -897,8 +865,7 @@ function renderVirtualRow(
 function configureDataCell(
   cell: HTMLElement,
   item: IndexedRow,
-  columnIndex: number,
-  pinned: boolean
+  columnIndex: number
 ): void {
   if (!dataset) return;
   const selection = tableState.ui?.selectedCell;
@@ -912,7 +879,6 @@ function configureDataCell(
   cell.setAttribute('aria-colindex', String(columnIndex + 2));
   cell.setAttribute('aria-selected', String(selected));
   cell.tabIndex = selected ? 0 : -1;
-  if (pinned) applyPinnedStyle(cell, columnIndex);
   renderCell(cell, item.row[columnIndex] ?? null);
 }
 
@@ -961,25 +927,22 @@ function renderHeaders(columnRange: VirtualColumnRange): void {
   elements.tableHead.replaceChildren();
   const indexHeader = document.createElement('div');
   indexHeader.className = 'virtual-cell virtual-header-cell row-index';
-  setElementWidth(indexHeader, 54);
+  setElementWidth(indexHeader, ROW_INDEX_WIDTH);
   indexHeader.textContent = '#';
   indexHeader.setAttribute('role', 'columnheader');
   elements.tableHead.appendChild(indexHeader);
-  for (const columnIndex of virtualPinnedColumns) {
-    elements.tableHead.appendChild(createHeaderCell(columnIndex, true));
-  }
   const before = document.createElement('div');
   configureSpacer(before, columnRange.before);
   elements.tableHead.appendChild(before);
-  for (const columnIndex of virtualScrollingColumns.slice(columnRange.start, columnRange.end)) {
-    elements.tableHead.appendChild(createHeaderCell(columnIndex, false));
+  for (const columnIndex of virtualColumnOrder.slice(columnRange.start, columnRange.end)) {
+    elements.tableHead.appendChild(createHeaderCell(columnIndex));
   }
   const after = document.createElement('div');
   configureSpacer(after, columnRange.after);
   elements.tableHead.appendChild(after);
 }
 
-function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
+function createHeaderCell(columnIndex: number): HTMLElement {
   if (!dataset) throw new Error('Cannot render a header without a dataset.');
   const column = dataset.columns[columnIndex];
   const header = document.createElement('div');
@@ -988,7 +951,6 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
   applyColumnDimensions(header, columnIndex);
   header.setAttribute('role', 'columnheader');
   header.setAttribute('aria-colindex', String(columnIndex + 2));
-  if (pinned) applyPinnedStyle(header, columnIndex);
   const controls = document.createElement('div');
   controls.className = 'column-controls';
 
@@ -1106,68 +1068,6 @@ function createHeaderCell(columnIndex: number, pinned: boolean): HTMLElement {
   return header;
 }
 
-function renderColumnsMenu(): void {
-  if (!dataset) return;
-  elements.columnsList.replaceChildren();
-  const fragment = document.createDocumentFragment();
-  const hidden = new Set(tableState.ui?.hiddenColumns ?? []);
-  const pinned = new Set(tableState.ui?.pinnedColumns ?? []);
-  const visibleCount = dataset.columns.length - hidden.size;
-  dataset.columns.forEach((column, columnIndex) => {
-    const item = document.createElement('div');
-    item.className = 'column-menu-item';
-    const visibility = document.createElement('label');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = !hidden.has(columnIndex);
-    checkbox.disabled = checkbox.checked && visibleCount <= 1;
-    const name = document.createElement('span');
-    name.textContent = column;
-    name.title = column;
-    visibility.append(checkbox, name);
-    checkbox.addEventListener('change', () => {
-      const nextHidden = new Set(tableState.ui?.hiddenColumns ?? []);
-      if (checkbox.checked) nextHidden.delete(columnIndex);
-      else nextHidden.add(columnIndex);
-      const nextPinned = (tableState.ui?.pinnedColumns ?? []).filter(
-        (candidate) => !nextHidden.has(candidate)
-      );
-      updateUi({ hiddenColumns: [...nextHidden], pinnedColumns: nextPinned });
-      renderColumnsMenu();
-      renderTable();
-    });
-
-    const pin = document.createElement('button');
-    pin.type = 'button';
-    pin.className = 'pin-button';
-    pin.disabled = hidden.has(columnIndex);
-    pin.setAttribute('aria-pressed', String(pinned.has(columnIndex)));
-    pin.textContent = pinned.has(columnIndex) ? 'Pinned' : 'Pin';
-    pin.addEventListener('click', () => {
-      const nextPinned = [...(tableState.ui?.pinnedColumns ?? [])];
-      const position = nextPinned.indexOf(columnIndex);
-      if (position >= 0) nextPinned.splice(position, 1);
-      else nextPinned.push(columnIndex);
-      updateUi({ pinnedColumns: nextPinned });
-      renderColumnsMenu();
-      renderTable();
-    });
-
-    item.append(visibility, pin);
-    fragment.appendChild(item);
-  });
-  elements.columnsList.appendChild(fragment);
-}
-
-function currentColumnOrder(): number[] {
-  if (!dataset) return [];
-  return visibleColumnOrder(
-    dataset.columns.length,
-    tableState.ui?.hiddenColumns ?? [],
-    tableState.ui?.pinnedColumns ?? []
-  );
-}
-
 function columnWidth(columnIndex: number): number {
   return tableState.ui?.columnWidths?.[String(columnIndex)] ?? DEFAULT_COLUMN_WIDTH;
 }
@@ -1195,7 +1095,6 @@ function setColumnWidth(columnIndex: number, width: number, render = true): void
         }
       }
     );
-    refreshPinnedOffsets();
   }
 }
 
@@ -1205,24 +1104,6 @@ function applyColumnDimensions(element: HTMLElement, columnIndex: number): void 
   element.style.flexBasis = width;
   element.style.minWidth = width;
   element.style.maxWidth = width;
-}
-
-function applyPinnedStyle(element: HTMLElement, columnIndex: number): void {
-  const pinned = tableState.ui?.pinnedColumns ?? [];
-  const position = pinned.indexOf(columnIndex);
-  if (position < 0) return;
-  const left = pinned
-    .slice(0, position)
-    .reduce((offset, pinnedColumn) => offset + columnWidth(pinnedColumn), 54);
-  element.classList.add('pinned');
-  element.style.left = `${left}px`;
-}
-
-function refreshPinnedOffsets(): void {
-  document.querySelectorAll<HTMLElement>('.pinned[data-column-index]').forEach((element) => {
-    const columnIndex = Number(element.dataset.columnIndex);
-    if (Number.isInteger(columnIndex)) applyPinnedStyle(element, columnIndex);
-  });
 }
 
 function ensureValidSelection(rowOrder: number[], columnOrder: number[]): CellSelection | undefined {
@@ -1272,18 +1153,13 @@ function scrollSelectionIntoView(selection: CellSelection, rowPosition: number):
     elements.tableScroll.scrollTop = rowBottom - elements.tableScroll.clientHeight;
   }
 
-  if (virtualPinnedColumns.includes(selection.columnIndex)) return;
-  const scrollingPosition = virtualScrollingColumns.indexOf(selection.columnIndex);
-  if (scrollingPosition < 0) return;
-  const pinnedWidth = 54 + virtualPinnedColumns.reduce(
-    (width, columnIndex) => width + columnWidth(columnIndex),
-    0
-  );
-  const columnStart = virtualScrollingColumns
-    .slice(0, scrollingPosition)
+  const columnPosition = virtualColumnOrder.indexOf(selection.columnIndex);
+  if (columnPosition < 0) return;
+  const columnStart = virtualColumnOrder
+    .slice(0, columnPosition)
     .reduce((width, columnIndex) => width + columnWidth(columnIndex), 0);
   const columnEnd = columnStart + columnWidth(selection.columnIndex);
-  const visibleWidth = Math.max(0, elements.tableScroll.clientWidth - pinnedWidth);
+  const visibleWidth = Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH);
   if (columnStart < elements.tableScroll.scrollLeft) {
     elements.tableScroll.scrollLeft = columnStart;
   } else if (columnEnd > elements.tableScroll.scrollLeft + visibleWidth) {

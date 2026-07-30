@@ -28,26 +28,6 @@ export type NavigationKey =
   | 'PageUp'
   | 'PageDown';
 
-export function visibleColumnOrder(
-  columnCount: number,
-  hiddenColumns: number[],
-  pinnedColumns: number[]
-): number[] {
-  const hidden = new Set(hiddenColumns);
-  const visiblePinned = pinnedColumns.filter(
-    (columnIndex, index) =>
-      columnIndex >= 0 &&
-      columnIndex < columnCount &&
-      !hidden.has(columnIndex) &&
-      pinnedColumns.indexOf(columnIndex) === index
-  );
-  const pinned = new Set(visiblePinned);
-  const remaining = Array.from({ length: columnCount }, (_, index) => index).filter(
-    (columnIndex) => !hidden.has(columnIndex) && !pinned.has(columnIndex)
-  );
-  return [...visiblePinned, ...remaining];
-}
-
 export function clampColumnWidth(width: number): number {
   return Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width)));
 }

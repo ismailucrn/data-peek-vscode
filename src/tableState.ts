@@ -141,10 +141,6 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
       ? (candidate.ui as Record<string, unknown>)
       : undefined;
   const columnWidths = normalizeColumnWidths(rawUi?.columnWidths, dataset.columns.length);
-  const hiddenColumns = normalizeColumnIndexes(rawUi?.hiddenColumns, dataset.columns.length);
-  const pinnedColumns = normalizeColumnIndexes(rawUi?.pinnedColumns, dataset.columns.length).filter(
-    (columnIndex) => !hiddenColumns.includes(columnIndex)
-  );
   const selectedCell = normalizeSelection(
     rawUi?.selectedCell,
     dataset.rows.length,
@@ -156,15 +152,11 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
     typeof rawUi?.profileQuery === 'string' ? rawUi.profileQuery.slice(0, 200) : undefined;
   const ui =
     columnWidths ||
-    hiddenColumns.length ||
-    pinnedColumns.length ||
     selectedCell ||
     profilesCollapsed !== undefined ||
     profileQuery
       ? {
           ...(columnWidths ? { columnWidths } : {}),
-          ...(hiddenColumns.length ? { hiddenColumns } : {}),
-          ...(pinnedColumns.length ? { pinnedColumns } : {}),
           ...(selectedCell ? { selectedCell } : {}),
           ...(profilesCollapsed !== undefined ? { profilesCollapsed } : {}),
           ...(profileQuery ? { profileQuery } : {})
@@ -371,17 +363,6 @@ function normalizeColumnWidths(
     }
   }
   return Object.keys(widths).length ? widths : undefined;
-}
-
-function normalizeColumnIndexes(value: unknown, columnCount: number): number[] {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value)].filter(
-    (columnIndex): columnIndex is number =>
-      typeof columnIndex === 'number' &&
-      Number.isInteger(columnIndex) &&
-      columnIndex >= 0 &&
-      columnIndex < columnCount
-  );
 }
 
 function normalizeSelection(

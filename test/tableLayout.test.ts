@@ -8,13 +8,8 @@ import {
   calculateVirtualRange,
   clampColumnWidth,
   estimateColumnWidth,
-  navigateSelection,
-  visibleColumnOrder
+  navigateSelection
 } from '../src/tableLayout';
-
-test('orders pinned columns first and omits hidden columns', () => {
-  assert.deepEqual(visibleColumnOrder(6, [1, 4], [3, 1, 3]), [3, 0, 2, 5]);
-});
 
 test('clamps and estimates column widths', () => {
   assert.equal(clampColumnWidth(10), MIN_COLUMN_WIDTH);

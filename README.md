@@ -8,7 +8,7 @@ Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TS
 - Use **Open with Data Peek** from the Explorer or editor-title context menu.
 - Search the loaded preview and combine multiple type-aware column filters.
 - Sort columns and scroll large tables with two-axis virtualization.
-- Resize, hide, and pin columns.
+- Resize columns.
 - Navigate cells with the keyboard and inspect the complete selected value.
 - Copy a cell, row, or column name to the clipboard.
 - View background-calculated full-data profiles for numeric, boolean, date, text, mixed, and empty columns.

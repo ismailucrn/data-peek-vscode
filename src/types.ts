@@ -41,8 +41,6 @@ export interface TableViewState {
   sort?: SortState;
   ui?: {
     columnWidths?: Record<string, number>;
-    hiddenColumns?: number[];
-    pinnedColumns?: number[];
     selectedCell?: CellSelection;
     profilesCollapsed?: boolean;
     profileQuery?: string;

@@ -324,19 +324,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           <span>Worksheet</span>
           <select id="sheet"></select>
         </label>
-        <button id="columns-menu-toggle" class="button secondary" type="button" aria-expanded="false">Columns</button>
       </div>
-
-      <section id="columns-menu" class="columns-menu hidden" aria-labelledby="columns-title">
-        <div class="columns-menu-heading">
-          <div>
-            <span class="eyebrow">TABLE LAYOUT</span>
-            <h2 id="columns-title">Columns</h2>
-          </div>
-          <button id="show-all-columns" class="link-button" type="button">Show all</button>
-        </div>
-        <div id="columns-list" class="columns-list"></div>
-      </section>
 
       <div id="operation-status" class="operation-status hidden" role="status" aria-live="polite"></div>
 

@@ -213,7 +213,7 @@ test('discards retired pagination preferences from restored state', () => {
   );
 });
 
-test('bounds restored column layout and cell selection state', () => {
+test('bounds restored column widths and discards retired visibility state', () => {
   assert.deepEqual(
     normalizeTableViewState(
       {
@@ -233,8 +233,6 @@ test('bounds restored column layout and cell selection state', () => {
       filters: [],
       ui: {
         columnWidths: { 0: 72, 1: 240 },
-        hiddenColumns: [1],
-        pinnedColumns: [2],
         selectedCell: { rowIndex: 2, columnIndex: 3 }
       }
     }
