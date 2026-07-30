@@ -445,7 +445,9 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
   height: max(240px, calc(100vh - 360px));
   min-height: 240px;
   contain: strict;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  touch-action: pan-x pan-y;
 }
 .table-surface { position: relative; min-width: 100%; }
 .virtual-header, .virtual-row {
