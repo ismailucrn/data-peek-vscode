@@ -509,7 +509,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 .virtual-header {
   position: sticky;
-  z-index: 5;
+  z-index: 20;
   top: 0;
   height: 36px;
   background: var(--vscode-editorGroupHeader-tabsBackground, var(--surface-raised));
@@ -608,7 +608,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 .resize-handle:hover, .resize-handle:focus-visible { background: var(--vscode-focusBorder); }
 .row-index {
   position: sticky;
-  z-index: 3;
+  z-index: 10;
   left: 0;
   flex-basis: 54px;
   color: var(--muted);
@@ -620,7 +620,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 .virtual-cell.null { color: var(--muted); font-style: italic; }
 .virtual-cell[role='gridcell'] { cursor: default; }
 .virtual-cell[role='gridcell'].selected {
-  z-index: 8;
+  z-index: 4;
   outline: 2px solid var(--vscode-focusBorder);
   outline-offset: -2px;
   background: var(--vscode-list-activeSelectionBackground);
