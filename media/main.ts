@@ -154,7 +154,6 @@ let activeFilterColumn: number | null = null;
 let filterSequence = 0;
 let statusTimer = 0;
 let tableScrollFrame = 0;
-let profileScrollFrame = 0;
 let resizeFrame = 0;
 let virtualRows: IndexedRow[] = [];
 let virtualRowIndexes: number[] = [];
@@ -199,14 +198,33 @@ elements.tableScroll.addEventListener('scroll', () => {
     renderVirtualViewport();
   });
 }, { passive: true });
-elements.profiles.addEventListener('scroll', () => {
-  if (profileScrollFrame) return;
-  profileScrollFrame = window.requestAnimationFrame(() => {
-    profileScrollFrame = 0;
-    elements.tableScroll.scrollLeft = elements.profiles.scrollLeft;
-    renderVirtualViewport();
-  });
-}, { passive: true });
+elements.profiles.addEventListener('wheel', (event) => {
+  const shiftedDelta = event.shiftKey && Math.abs(event.deltaX) < Math.abs(event.deltaY);
+  const horizontalDelta = shiftedDelta ? event.deltaY : event.deltaX;
+  if (
+    horizontalDelta === 0 ||
+    (!event.shiftKey && Math.abs(event.deltaX) <= Math.abs(event.deltaY))
+  ) return;
+  const unit =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? elements.tableScroll.clientWidth
+        : 1;
+  const previous = elements.tableScroll.scrollLeft;
+  setSharedHorizontalScroll(previous + horizontalDelta * unit);
+  if (elements.tableScroll.scrollLeft !== previous) event.preventDefault();
+}, { passive: false });
+elements.profiles.addEventListener('keydown', (event) => {
+  if (
+    event.target !== elements.profiles ||
+    (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')
+  ) return;
+  event.preventDefault();
+  setSharedHorizontalScroll(
+    elements.tableScroll.scrollLeft + (event.key === 'ArrowLeft' ? -80 : 80)
+  );
+});
 elements.tableBody.addEventListener('click', (event) => {
   const cell = (event.target as HTMLElement).closest<HTMLElement>('[role="gridcell"]');
   const rowIndex = Number(cell?.dataset.rowIndex);
@@ -908,6 +926,17 @@ function goToColumn(columnIndex: number): void {
   });
   elements.columnSearchStatus.textContent = `Moved to column ${columnName}.`;
   window.requestAnimationFrame(() => highlightColumnHeader(columnIndex));
+}
+
+function setSharedHorizontalScroll(scrollLeft: number): void {
+  const maximum = Math.max(
+    0,
+    elements.tableScroll.scrollWidth - elements.tableScroll.clientWidth
+  );
+  const next = Math.max(0, Math.min(scrollLeft, maximum));
+  elements.tableScroll.scrollLeft = next;
+  elements.profiles.scrollLeft = next;
+  renderVirtualViewport();
 }
 
 function highlightColumnHeader(columnIndex: number): void {

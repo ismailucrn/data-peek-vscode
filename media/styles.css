@@ -398,8 +398,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 .profiles {
   max-width: 100%;
-  overflow: auto;
-  overscroll-behavior-x: contain;
+  overflow: hidden;
   overscroll-behavior-y: auto;
   touch-action: pan-x pan-y;
 }
