@@ -578,24 +578,52 @@ function renderProfiles(): void {
     card.appendChild(heading);
 
     const stats = document.createElement('dl');
+    stats.className = 'profile-primary-stats';
     const approximate = new Set(profile.approximateMetrics ?? []);
-    addStat(stats, 'Non-null', formatNumber(profile.nonNull));
-    addStat(stats, 'Missing', formatNumber(profile.missing));
+    addStat(
+      stats,
+      'Missing',
+      `${formatNumber(profile.missing)} (${formatPercent(profile.missingRatio)})`
+    );
     addStat(stats, 'Distinct', formatNumber(profile.distinct), approximate.has('distinct'));
-    addStat(stats, 'Missing %', formatPercent(profile.missingRatio));
-    addStat(stats, 'Unique %', formatPercent(profile.uniqueRatio), approximate.has('distinct'));
-    if (profile.mean !== undefined) addStat(stats, 'Mean', formatCompact(profile.mean));
+    if (profile.min !== undefined && profile.max !== undefined) {
+      addStat(stats, 'Range', `${formatCompact(profile.min)}–${formatCompact(profile.max)}`);
+    }
+    card.appendChild(stats);
+
+    const statisticsDetails = document.createElement('details');
+    statisticsDetails.className = 'profile-details';
+    const statisticsSummary = document.createElement('summary');
+    statisticsSummary.textContent = 'More statistics';
+    const secondaryStats = document.createElement('dl');
+    secondaryStats.className = 'profile-secondary-stats';
+    addStat(secondaryStats, 'Non-null', formatNumber(profile.nonNull));
+    addStat(
+      secondaryStats,
+      'Unique %',
+      formatPercent(profile.uniqueRatio),
+      approximate.has('distinct')
+    );
+    if (profile.mean !== undefined) addStat(secondaryStats, 'Mean', formatCompact(profile.mean));
     if (profile.median !== undefined) {
-      addStat(stats, 'Median', formatCompact(profile.median), approximate.has('median'));
+      addStat(
+        secondaryStats,
+        'Median',
+        formatCompact(profile.median),
+        approximate.has('median')
+      );
     }
     if (profile.standardDeviation !== undefined) {
-      addStat(stats, 'Population σ', formatCompact(profile.standardDeviation));
+      addStat(secondaryStats, 'Population σ', formatCompact(profile.standardDeviation));
     }
-    if (profile.min !== undefined) addStat(stats, 'Min', formatCompact(profile.min));
-    if (profile.max !== undefined) addStat(stats, 'Max', formatCompact(profile.max));
-    if (profile.minLength !== undefined) addStat(stats, 'Min length', formatNumber(profile.minLength));
-    if (profile.maxLength !== undefined) addStat(stats, 'Max length', formatNumber(profile.maxLength));
-    card.appendChild(stats);
+    if (profile.minLength !== undefined) {
+      addStat(secondaryStats, 'Min length', formatNumber(profile.minLength));
+    }
+    if (profile.maxLength !== undefined) {
+      addStat(secondaryStats, 'Max length', formatNumber(profile.maxLength));
+    }
+    statisticsDetails.append(statisticsSummary, secondaryStats);
+    card.appendChild(statisticsDetails);
 
     if ((profile.histogram?.length ?? 0) > 0 || profile.topValues.length > 0) {
       const details = document.createElement('details');

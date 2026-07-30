@@ -403,10 +403,12 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 .profile-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .profile-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 10px 0 0; font-size: 11px; }
+.profile-card .profile-primary-stats { grid-template-columns: minmax(48px, auto) minmax(0, 1fr); }
 .profile-card dt { color: var(--muted); }
 .profile-card dd { overflow: hidden; margin: 0; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .profile-details { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 7px; }
 .profile-details summary { color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; }
+.profile-details .profile-secondary-stats { margin-top: 8px; }
 .profile-distribution { display: grid; gap: 5px; margin-top: 9px; }
 .profile-distribution > strong { color: var(--muted); font-size: 10px; text-transform: uppercase; }
 .histogram-row {
