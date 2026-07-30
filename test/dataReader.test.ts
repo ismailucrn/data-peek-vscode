@@ -52,10 +52,6 @@ test('caps wide CSV previews and reports the source column count', async () => {
     assert.equal(preview.totalColumns, 12);
     assert.equal(preview.truncatedColumns, true);
     assert.equal(preview.truncation.columns, true);
-    assert.equal(
-      preview.qualityWarnings.some((warning) => warning.code === 'truncatedColumns'),
-      true
-    );
     assert.equal(preview.rows[0].length, 10);
   });
 });
@@ -277,7 +273,7 @@ test('reports cells shortened by the normalization safety limit', async () => {
     assert.equal(preview.truncation.cells, 1);
     assert.equal(
       preview.qualityWarnings.some(
-        (warning) => warning.code === 'truncatedCells' && warning.count === 1
+        (warning) => warning.code === 'constant'
       ),
       true
     );
@@ -388,6 +384,7 @@ test('profiles Parquet values beyond the bounded preview', async () => {
     const preview = await loadPreview(filePath, options);
     assert.equal(preview.rows.length, 100);
     assert.equal(preview.profiles[0].distinct, 1);
+    assert.deepEqual(preview.qualityWarnings, []);
 
     const full = await loadFullProfiles(filePath, {
       ...options,
@@ -400,6 +397,12 @@ test('profiles Parquet values beyond the bounded preview', async () => {
       { value: 'late', count: 50 }
     ]);
     assert.equal(full.profiles[1].max, 149);
+    assert.equal(
+      full.qualityWarnings.some(
+        (warning) => warning.code === 'possibleIdentifier' && warning.columnIndex === 1
+      ),
+      true
+    );
   });
 });
 

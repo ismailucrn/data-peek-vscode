@@ -81,6 +81,7 @@ export interface ColumnProfile {
 export interface FullProfileResult {
   profiles: ColumnProfile[];
   rowCount: number;
+  qualityWarnings: QualityWarning[];
 }
 
 export type QualityWarningCode =
@@ -88,17 +89,12 @@ export type QualityWarningCode =
   | 'allEmpty'
   | 'constant'
   | 'highMissing'
-  | 'possibleIdentifier'
-  | 'duplicateRows'
-  | 'truncatedRows'
-  | 'truncatedColumns'
-  | 'truncatedCells';
+  | 'possibleIdentifier';
 
 export interface QualityWarning {
   code: QualityWarningCode;
   message: string;
   columnIndex?: number;
-  count?: number;
 }
 
 export interface TruncationInfo {

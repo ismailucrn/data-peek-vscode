@@ -110,7 +110,8 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
             ...preview,
             profiles: message.payload.profiles,
             profileScope: 'full',
-            profiledRowCount: message.payload.rowCount
+            profiledRowCount: message.payload.rowCount,
+            qualityWarnings: message.payload.qualityWarnings
           };
           void webviewPanel.webview.postMessage({ type: 'profiles', payload: message.payload });
         } else {
@@ -406,14 +407,6 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
         <div id="parsing-error" class="field-error hidden" role="alert"></div>
       </section>
 
-      <section id="quality-section" class="quality-section hidden" aria-labelledby="quality-title">
-        <div class="section-heading">
-          <h2 id="quality-title">Data quality</h2>
-          <span>Based on preview</span>
-        </div>
-        <div id="quality-warnings" class="quality-warnings"></div>
-      </section>
-
       <div class="table-workspace">
         <section class="table-section" aria-label="Data preview">
           <section class="profiles-section" aria-labelledby="profiles-title">
@@ -503,6 +496,14 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
           </div>
         </aside>
       </div>
+
+      <section id="quality-section" class="quality-section hidden" aria-labelledby="quality-title">
+        <div class="section-heading">
+          <h2 id="quality-title">Data quality</h2>
+          <span>Full dataset</span>
+        </div>
+        <div id="quality-warnings" class="quality-warnings"></div>
+      </section>
     </section>
   </main>
   <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -537,6 +538,7 @@ function isProfileWorkerMessage(value: unknown): value is ProfileWorkerMessage {
     const payload = message.payload as Record<string, unknown>;
     return (
       Array.isArray(payload.profiles) &&
+      Array.isArray(payload.qualityWarnings) &&
       typeof payload.rowCount === 'number' &&
       Number.isFinite(payload.rowCount) &&
       payload.rowCount >= 0

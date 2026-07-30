@@ -275,7 +275,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 .operation-status.error-status { border-left-color: var(--vscode-errorForeground); }
 
-.quality-section { margin-bottom: 20px; }
+.quality-section { margin-top: 20px; }
 .profiles-section {
   min-width: 0;
   border-bottom: 1px solid var(--border);
@@ -393,9 +393,6 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
   font-size: 11px;
 }
 .quality-icon { color: var(--vscode-editorWarning-foreground, #cca700); font-weight: 800; }
-.quality-truncatedRows, .quality-truncatedColumns, .quality-truncatedCells {
-  border-left-color: var(--vscode-errorForeground);
-}
 .profiles {
   max-width: 100%;
   overflow: hidden;

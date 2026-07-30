@@ -24,7 +24,7 @@ The editor never changes or writes back to the source file. CSV/TSV and Parquet 
 
 Data Peek treats files as untrusted input. Preview rows, columns, total cells, cell size, and expanded Parquet data are bounded. Full-data profiling has a separate scan-size boundary and uses bounded-memory summaries. Excel archives pass ZIP safety checks before ExcelJS loads them. File values are never interpreted as HTML; they are rendered through safe DOM text nodes.
 
-The bounded table preview appears first. When the source has more rows, column profiles are recalculated in the background across the complete dataset and replace the preview profiles when ready. Counts, missing ratios, types, minimums, maximums, means, standard deviations, and text-length bounds are exact. On high-cardinality columns, bounded-memory estimates for distinct counts, medians, histograms, and top values are marked with `≈`. Search, filters, sorting, duplicate-row warnings, and copied rows continue to operate only on the loaded table preview.
+The bounded table preview appears first. When the source has more rows, column profiles are recalculated in the background across the complete dataset and replace the preview profiles when ready. Counts, missing ratios, types, minimums, maximums, means, standard deviations, and text-length bounds are exact. On high-cardinality columns, bounded-memory estimates for distinct counts, medians, histograms, and top values are marked with `≈`. Data-quality warnings are generated only from these full-data column profiles. Search, filters, sorting, and copied rows continue to operate only on the loaded table preview.
 
 ## Usage
 

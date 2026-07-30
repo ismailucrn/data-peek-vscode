@@ -33,6 +33,7 @@ import {
   DatasetPreview,
   DelimitedParsingSettings,
   FilterOperator,
+  FullProfileResult,
   HostToWebviewMessage,
   IndexedRow,
   SerializableCell,
@@ -342,18 +343,17 @@ function receiveDataset(nextDataset: DatasetPreview): void {
   }
 }
 
-function receiveFullProfiles(result: {
-  profiles: DatasetPreview['profiles'];
-  rowCount: number;
-}): void {
+function receiveFullProfiles(result: FullProfileResult): void {
   if (!dataset || result.profiles.length !== dataset.columns.length) return;
   dataset = {
     ...dataset,
     profiles: result.profiles,
     profileScope: 'full',
-    profiledRowCount: result.rowCount
+    profiledRowCount: result.rowCount,
+    qualityWarnings: result.qualityWarnings
   };
   profileActivity = { state: 'idle' };
+  renderQualityWarnings();
   renderTable();
 }
 
@@ -668,7 +668,7 @@ function renderQualityWarnings(): void {
     item.className = `quality-warning quality-${warning.code}`;
     const icon = document.createElement('span');
     icon.className = 'quality-icon';
-    icon.textContent = warning.code.startsWith('truncated') ? '!' : '•';
+    icon.textContent = '•';
     icon.setAttribute('aria-hidden', 'true');
     const message = document.createElement('span');
     message.textContent = warning.message;

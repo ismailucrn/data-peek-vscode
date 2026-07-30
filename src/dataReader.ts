@@ -31,6 +31,11 @@ const MAX_CSV_RECORD_BYTES = 2 * 1024 * 1024;
 const MAX_PREVIEW_CELLS = 250_000;
 const MAX_PARQUET_PREVIEW_EXPANDED_BYTES = 256n * 1024n * 1024n;
 
+interface ProfileScanResult {
+  profiles: DatasetPreview['profiles'];
+  rowCount: number;
+}
+
 export function isSupportedFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
@@ -112,16 +117,20 @@ export async function loadFullProfiles(
     if (!parsingResult.value) {
       throw new Error(`Invalid parsing settings: ${parsingResult.error ?? 'unknown error'}`);
     }
-    return profileDelimited(
-      filePath,
-      extension === '.tsv' ? '\t' : ',',
-      options.columns,
-      parsingResult.value,
-      options
+    return completeFullProfile(
+      await profileDelimited(
+        filePath,
+        extension === '.tsv' ? '\t' : ',',
+        options.columns,
+        parsingResult.value,
+        options
+      )
     );
   }
   if (extension === '.parquet') {
-    return profileParquet(filePath, options.columns, maximumScanBytes, options);
+    return completeFullProfile(
+      await profileParquet(filePath, options.columns, maximumScanBytes, options)
+    );
   }
   if (extension === '.xlsx' || extension === '.xlsm') {
     const maximumBytes =
@@ -134,9 +143,16 @@ export async function loadFullProfiles(
     const maxExpandedBytes =
       clampNumber(options.maxExcelExpandedSizeMB, 10, 2000, 250) * 1024 * 1024;
     await validateExcelArchive(filePath, maxExpandedBytes);
-    return profileExcel(filePath, options.columns, options);
+    return completeFullProfile(await profileExcel(filePath, options.columns, options));
   }
   throw new Error(`Unsupported file type: ${extension || '(no extension)'}`);
+}
+
+function completeFullProfile(result: ProfileScanResult): FullProfileResult {
+  return {
+    ...result,
+    qualityWarnings: buildQualityWarnings(result.profiles)
+  };
 }
 
 async function profileDelimited(
@@ -145,7 +161,7 @@ async function profileDelimited(
   columns: string[],
   settings: DelimitedParsingSettings,
   options: FullProfileOptions
-): Promise<FullProfileResult> {
+): Promise<ProfileScanResult> {
   const detectedDelimiter = await detectDelimiter(
     filePath,
     settings,
@@ -202,7 +218,7 @@ async function profileParquet(
   columns: string[],
   maximumScanBytes: number,
   options: FullProfileOptions
-): Promise<FullProfileResult> {
+): Promise<ProfileScanResult> {
   const [{ asyncBufferFromFile, parquetMetadataAsync, parquetRead }, compressorModule] =
     await Promise.all([import('hyparquet'), import('hyparquet-compressors')]);
   ensureNotCancelled(options.isCancelled);
@@ -253,7 +269,7 @@ async function profileExcel(
   filePath: string,
   columns: string[],
   options: FullProfileOptions
-): Promise<FullProfileResult> {
+): Promise<ProfileScanResult> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
   ensureNotCancelled(options.isCancelled);
@@ -663,6 +679,7 @@ function makePreview(input: {
   parsing?: DelimitedParsingMetadata;
 }): DatasetPreview {
   const profiles = buildProfiles(input.columns, input.rows);
+  const profileScope = input.truncated ? 'preview' : 'full';
   const totalColumns = input.totalColumns ?? input.columns.length;
   const truncation = {
     rows: input.truncated,
@@ -682,8 +699,8 @@ function makePreview(input: {
     totalRows: input.totalRows,
     truncated: input.truncated,
     truncation,
-    qualityWarnings: buildQualityWarnings(profiles, input.rows, truncation),
-    profileScope: input.truncated ? 'preview' : 'full',
+    qualityWarnings: profileScope === 'full' ? buildQualityWarnings(profiles) : [],
+    profileScope,
     profiledRowCount: input.rows.length,
     parsing: input.parsing,
     sheet: input.sheet,

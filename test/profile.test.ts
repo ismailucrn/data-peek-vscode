@@ -95,7 +95,7 @@ test('streams full-data profiles with exact bounded metrics and marked estimates
   assert.equal(group.approximateMetrics, undefined);
 });
 
-test('creates preview quality warnings for columns, duplicates and truncation', () => {
+test('creates full-data quality warnings from column profiles', () => {
   const rows: SerializableCell[][] = Array.from({ length: 50 }, (_, index) => [
     `id-${index}`,
     index === 0 ? 'text' : index,
@@ -104,24 +104,17 @@ test('creates preview quality warnings for columns, duplicates and truncation', 
   ]);
   rows.push([...rows[0]]);
   const profiles = buildProfiles(['id', 'mixed', 'empty', 'missing'], rows);
-  const warnings = buildQualityWarnings(profiles, rows, {
-    rows: true,
-    columns: true,
-    cells: 2
-  });
+  const warnings = buildQualityWarnings(profiles);
   const codes = new Set(warnings.map((warning) => warning.code));
   assert.deepEqual(
     [...codes].sort(),
     [
       'allEmpty',
       'constant',
-      'duplicateRows',
       'highMissing',
       'mixedType',
-      'possibleIdentifier',
-      'truncatedCells',
-      'truncatedColumns',
-      'truncatedRows'
+      'possibleIdentifier'
     ].sort()
   );
+  assert.equal(warnings.some((warning) => warning.message.includes('preview')), false);
 });
