@@ -153,7 +153,8 @@ let searchTimer = 0;
 let activeFilterColumn: number | null = null;
 let filterSequence = 0;
 let statusTimer = 0;
-let scrollFrame = 0;
+let tableScrollFrame = 0;
+let profileScrollFrame = 0;
 let resizeFrame = 0;
 let virtualRows: IndexedRow[] = [];
 let virtualRowIndexes: number[] = [];
@@ -191,10 +192,18 @@ elements.sheet.addEventListener('change', () => {
   vscode.postMessage({ type: 'selectSheet', sheet: elements.sheet.value });
 });
 elements.tableScroll.addEventListener('scroll', () => {
-  if (scrollFrame) return;
-  scrollFrame = window.requestAnimationFrame(() => {
-    scrollFrame = 0;
+  if (tableScrollFrame) return;
+  tableScrollFrame = window.requestAnimationFrame(() => {
+    tableScrollFrame = 0;
     elements.profiles.scrollLeft = elements.tableScroll.scrollLeft;
+    renderVirtualViewport();
+  });
+}, { passive: true });
+elements.profiles.addEventListener('scroll', () => {
+  if (profileScrollFrame) return;
+  profileScrollFrame = window.requestAnimationFrame(() => {
+    profileScrollFrame = 0;
+    elements.tableScroll.scrollLeft = elements.profiles.scrollLeft;
     renderVirtualViewport();
   });
 }, { passive: true });
@@ -564,9 +573,13 @@ function renderProfiles(): void {
       `${formatNumber(profile.missing)} (${formatPercent(profile.missingRatio)})`
     );
     addStat(stats, 'Distinct', formatNumber(profile.distinct), approximate.has('distinct'));
-    if (profile.min !== undefined && profile.max !== undefined) {
-      addStat(stats, 'Range', `${formatCompact(profile.min)}–${formatCompact(profile.max)}`);
-    }
+    addStat(
+      stats,
+      'Range',
+      profile.min !== undefined && profile.max !== undefined
+        ? `${formatCompact(profile.min)}–${formatCompact(profile.max)}`
+        : '—'
+    );
     card.appendChild(stats);
 
     const statisticsDetails = document.createElement('details');
@@ -1119,14 +1132,12 @@ function createHeaderCell(columnIndex: number): HTMLElement {
     const label = document.createElement('span');
     label.textContent = column;
     label.title = column;
-    const type = document.createElement('small');
-    type.textContent = dataset?.profiles[columnIndex]?.type ?? 'text';
     const arrow = document.createElement('span');
     arrow.className = 'sort-arrow';
     const sort = tableState.sort;
     arrow.textContent =
       sort?.columnIndex === columnIndex ? (sort.direction === 'asc' ? '↑' : '↓') : '↕';
-    sortButton.append(label, type, arrow);
+    sortButton.append(label, arrow);
     sortButton.addEventListener('click', () => {
       const current = tableState.sort;
       tableState = {

@@ -434,7 +434,7 @@ export class DataPeekEditorProvider implements vscode.CustomReadonlyEditorProvid
                 </div>
               </div>
             </div>
-            <div id="profiles" class="profiles">
+            <div id="profiles" class="profiles" tabindex="0" aria-label="Scrollable column profiles">
               <div id="profiles-surface" class="profiles-surface"></div>
             </div>
           </section>

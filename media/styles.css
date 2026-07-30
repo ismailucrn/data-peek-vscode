@@ -398,8 +398,14 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 .profiles {
   max-width: 100%;
-  overflow: hidden;
-  overscroll-behavior: contain;
+  overflow: auto;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  touch-action: pan-x pan-y;
+}
+.profiles:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
 }
 .profiles-surface {
   display: flex;
@@ -532,7 +538,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 .column-button {
   display: grid;
-  grid-template-columns: minmax(70px, 1fr) auto auto;
+  grid-template-columns: minmax(70px, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -544,7 +550,6 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
   cursor: pointer;
 }
 .column-button > span:first-child { overflow: hidden; text-overflow: ellipsis; }
-.column-button small { color: var(--muted); font-weight: 400; }
 .sort-arrow { color: var(--muted); }
 .filter-button {
   display: grid;
