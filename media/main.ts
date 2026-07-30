@@ -644,11 +644,11 @@ function renderProfiles(): void {
       details.addEventListener('toggle', () => {
         if (!details.open || detailsRendered) return;
         detailsRendered = true;
-        if (profile.histogram?.length) {
-          renderHistogram(details, profile.histogram, approximate.has('histogram'));
-        }
         if (profile.topValues.length) {
           renderTopValues(details, profile.topValues, approximate.has('topValues'));
+        }
+        if (profile.histogram?.length) {
+          renderHistogram(details, profile.histogram, approximate.has('histogram'));
         }
       });
       card.appendChild(details);
@@ -690,27 +690,41 @@ function renderHistogram(
   heading.textContent = approximate ? 'Histogram (estimated)' : 'Histogram';
   section.appendChild(heading);
   const maximum = Math.max(...bins.map((bin) => bin.count), 1);
+  const chart = document.createElement('div');
+  chart.className = 'histogram-chart';
+  chart.setAttribute('role', 'img');
+  chart.setAttribute(
+    'aria-label',
+    `${approximate ? 'Estimated histogram' : 'Histogram'}. ` +
+      bins.map((bin) => `${formatHistogramRange(bin.start, bin.end)}: ${formatNumber(bin.count)}`).join(', ')
+  );
   for (const bin of bins) {
-    const row = document.createElement('div');
-    row.className = 'histogram-row';
-    const label = document.createElement('span');
-    label.textContent =
-      bin.start === bin.end
-        ? formatCompact(bin.start)
-        : `${formatCompact(bin.start)}–${formatCompact(bin.end)}`;
-    label.title = label.textContent;
-    const track = document.createElement('span');
-    track.className = 'histogram-track';
     const bar = document.createElement('span');
-    bar.className = 'histogram-bar';
-    bar.style.width = `${(bin.count / maximum) * 100}%`;
-    track.appendChild(bar);
-    const count = document.createElement('span');
-    count.textContent = `${approximate ? '≈' : ''}${formatNumber(bin.count)}`;
-    row.append(label, track, count);
-    section.appendChild(row);
+    bar.className = 'histogram-column';
+    bar.style.height = `${(bin.count / maximum) * 100}%`;
+    bar.title =
+      `${formatHistogramRange(bin.start, bin.end)} · ` +
+      `${approximate ? '≈' : ''}${formatNumber(bin.count)}`;
+    bar.setAttribute('aria-hidden', 'true');
+    chart.appendChild(bar);
   }
+  const axis = document.createElement('div');
+  axis.className = `histogram-axis${bins.length === 1 ? ' single-value' : ''}`;
+  axis.setAttribute('aria-hidden', 'true');
+  const start = document.createElement('span');
+  start.textContent = formatCompact(bins[0].start);
+  axis.appendChild(start);
+  if (bins.length > 1) {
+    const end = document.createElement('span');
+    end.textContent = formatCompact(bins[bins.length - 1].end);
+    axis.appendChild(end);
+  }
+  section.append(chart, axis);
   container.appendChild(section);
+}
+
+function formatHistogramRange(start: number, end: number): string {
+  return start === end ? formatCompact(start) : `${formatCompact(start)}–${formatCompact(end)}`;
 }
 
 function renderTopValues(

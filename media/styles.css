@@ -442,16 +442,36 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 .profile-details .profile-secondary-stats { margin-top: 8px; }
 .profile-distribution { display: grid; gap: 5px; margin-top: 9px; }
 .profile-distribution > strong { color: var(--muted); font-size: 10px; text-transform: uppercase; }
-.histogram-row {
-  display: grid;
-  grid-template-columns: minmax(70px, 1fr) minmax(50px, 1.5fr) auto;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
+.histogram-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 62px;
+  border-bottom: 1px solid var(--border);
+  padding: 5px 2px 0;
 }
-.histogram-row > span:first-child { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.histogram-track { height: 7px; overflow: hidden; border-radius: 2px; background: var(--vscode-editorWidget-border, var(--border)); }
-.histogram-bar { display: block; height: 100%; background: var(--vscode-charts-blue, var(--accent)); }
+.histogram-column {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--vscode-charts-blue, var(--accent));
+  opacity: 0.82;
+}
+.histogram-column:hover { opacity: 1; }
+.histogram-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.histogram-axis.single-value { justify-content: center; }
+.histogram-axis span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .top-value-row {
   display: flex;
   justify-content: space-between;
