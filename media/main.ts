@@ -20,8 +20,10 @@ import {
   VirtualRange,
   calculateVirtualColumns,
   calculateVirtualRange,
+  centeredColumnScrollOffset,
   clampColumnWidth,
   estimateColumnWidth,
+  matchColumnNames,
   navigateSelection
 } from '../src/tableLayout';
 import {
@@ -110,7 +112,9 @@ const elements = {
   profiles: requiredElement<HTMLElement>('profiles'),
   profilesSurface: requiredElement<HTMLElement>('profiles-surface'),
   profilesNote: requiredElement<HTMLElement>('profiles-note'),
+  profileSearchField: requiredElement<HTMLElement>('profile-search-field'),
   profileSearch: requiredElement<HTMLInputElement>('profile-search'),
+  columnSearchResults: requiredElement<HTMLElement>('column-search-results'),
   toggleProfiles: requiredElement<HTMLButtonElement>('toggle-profiles'),
   tableHead: requiredElement<HTMLElement>('table-head'),
   tableBody: requiredElement<HTMLElement>('table-body'),
@@ -157,6 +161,9 @@ let virtualColumnWidths: number[] = [];
 let renderedRows: VirtualRange = { start: -1, end: -1 };
 let renderedColumns = '';
 let currentDatasetSignature = '';
+let columnSearchMatches: number[] = [];
+let activeColumnMatch = -1;
+let columnHighlightTimer = 0;
 let profileActivity:
   | { state: 'idle' }
   | { state: 'running'; processedRows: number; totalRows: number | null }
@@ -209,9 +216,11 @@ window.addEventListener('resize', () => {
 elements.copyCell.addEventListener('click', () => requestCopy('cell'));
 elements.copyRow.addEventListener('click', () => requestCopy('row'));
 elements.copyColumnName.addEventListener('click', () => requestCopy('columnName'));
-elements.profileSearch.addEventListener('input', () => {
-  updateUi({ profileQuery: elements.profileSearch.value.slice(0, 200) });
-  renderProfiles();
+elements.profileSearch.addEventListener('input', renderColumnSearchResults);
+elements.profileSearch.addEventListener('focus', renderColumnSearchResults);
+elements.profileSearch.addEventListener('keydown', handleColumnSearchKeydown);
+document.addEventListener('pointerdown', (event) => {
+  if (!elements.profileSearchField.contains(event.target as Node)) closeColumnSearchResults();
 });
 elements.toggleProfiles.addEventListener('click', () => {
   updateUi({ profilesCollapsed: !tableState.ui?.profilesCollapsed });
@@ -292,7 +301,8 @@ function receiveDataset(nextDataset: DatasetPreview): void {
       : { ...EMPTY_TABLE_VIEW_STATE, filters: [] };
   activeFilterColumn = null;
   elements.search.value = tableState.query;
-  elements.profileSearch.value = tableState.ui?.profileQuery ?? '';
+  elements.profileSearch.value = '';
+  closeColumnSearchResults();
   elements.tableScroll.scrollTop = 0;
   elements.tableScroll.scrollLeft = 0;
   closeFilterPanel();
@@ -507,14 +517,10 @@ function renderProfiles(): void {
   if (!dataset) return;
   elements.profilesSurface.replaceChildren();
   const collapsed = tableState.ui?.profilesCollapsed ?? false;
-  const query = (tableState.ui?.profileQuery ?? '').trim().toLowerCase();
-  const matchedColumns = virtualColumnOrder.filter((columnIndex) =>
-    dataset?.profiles[columnIndex]?.name.toLowerCase().includes(query)
-  );
   elements.profiles.classList.toggle('hidden', collapsed);
   elements.toggleProfiles.textContent = collapsed ? 'Show profiles' : 'Hide profiles';
   elements.toggleProfiles.setAttribute('aria-expanded', String(!collapsed));
-  renderProfileNote(matchedColumns.length);
+  renderProfileNote();
   if (collapsed) return;
 
   const contentWidth = ROW_INDEX_WIDTH + virtualColumnWidths.reduce(
@@ -533,14 +539,6 @@ function renderProfiles(): void {
   for (const columnIndex of virtualColumnOrder) {
     const profile = dataset.profiles[columnIndex];
     if (!profile) continue;
-    if (query && !profile.name.toLowerCase().includes(query)) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'profile-placeholder';
-      placeholder.dataset.columnIndex = String(columnIndex);
-      applyColumnDimensions(placeholder, columnIndex);
-      fragment.appendChild(placeholder);
-      continue;
-    }
     const card = document.createElement('article');
     card.className = 'profile-card';
     card.dataset.columnIndex = String(columnIndex);
@@ -716,14 +714,9 @@ function addStat(list: HTMLElement, label: string, value: string, approximate = 
   list.append(term, definition);
 }
 
-function renderProfileNote(matchedColumns?: number): void {
+function renderProfileNote(): void {
   if (!dataset) return;
-  const visible = matchedColumns ?? virtualColumnOrder.filter((columnIndex) =>
-    dataset?.profiles[columnIndex]?.name
-      .toLowerCase()
-      .includes((tableState.ui?.profileQuery ?? '').trim().toLowerCase())
-  ).length;
-  const columnSummary = `${visible} of ${virtualColumnOrder.length} visible`;
+  const columnSummary = `${formatNumber(virtualColumnOrder.length)} columns`;
   if (dataset.profileScope === 'full') {
     const estimated = dataset.profiles.some(
       (profile) => (profile.approximateMetrics?.length ?? 0) > 0
@@ -751,6 +744,159 @@ function renderProfileNote(matchedColumns?: number): void {
   }
   elements.profilesNote.textContent =
     `Based on preview · ${formatNumber(dataset.profiledRowCount)} rows · ${columnSummary}`;
+}
+
+function renderColumnSearchResults(): void {
+  if (!dataset) {
+    closeColumnSearchResults();
+    return;
+  }
+  const query = elements.profileSearch.value.slice(0, 200);
+  if (elements.profileSearch.value !== query) elements.profileSearch.value = query;
+  const result = matchColumnNames(dataset.columns, query);
+  columnSearchMatches = result.matches;
+  activeColumnMatch = result.matches.length > 0 ? 0 : -1;
+  elements.columnSearchResults.replaceChildren();
+  if (!query.trim()) {
+    closeColumnSearchResults();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  if (result.matches.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'column-search-empty';
+    empty.textContent = 'No matching columns';
+    fragment.appendChild(empty);
+  } else {
+    result.matches.forEach((columnIndex, matchIndex) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.id = `column-search-option-${columnIndex}`;
+      option.className = 'column-search-option';
+      option.dataset.matchIndex = String(matchIndex);
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(matchIndex === activeColumnMatch));
+      option.tabIndex = -1;
+      const name = document.createElement('span');
+      name.className = 'column-search-name';
+      appendHighlightedText(name, dataset?.columns[columnIndex] ?? '', query);
+      const type = document.createElement('span');
+      type.className = 'column-search-type';
+      type.textContent = dataset?.profiles[columnIndex]?.type ?? 'text';
+      option.append(name, type);
+      option.addEventListener('click', () => goToColumn(columnIndex));
+      fragment.appendChild(option);
+    });
+    if (result.total > result.matches.length) {
+      const remaining = document.createElement('div');
+      remaining.className = 'column-search-more';
+      remaining.textContent =
+        `${formatNumber(result.total - result.matches.length)} more matching columns`;
+      fragment.appendChild(remaining);
+    }
+  }
+  elements.columnSearchResults.appendChild(fragment);
+  elements.columnSearchResults.classList.remove('hidden');
+  elements.profileSearch.setAttribute('aria-expanded', 'true');
+  updateActiveColumnMatch();
+}
+
+function handleColumnSearchKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    closeColumnSearchResults();
+    return;
+  }
+  if (event.key === 'Tab') {
+    closeColumnSearchResults();
+    return;
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (columnSearchMatches.length === 0) return;
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    activeColumnMatch =
+      (activeColumnMatch + direction + columnSearchMatches.length) %
+      columnSearchMatches.length;
+    updateActiveColumnMatch();
+    return;
+  }
+  if (event.key === 'Enter' && columnSearchMatches.length > 0) {
+    event.preventDefault();
+    const matchPosition = activeColumnMatch >= 0 ? activeColumnMatch : 0;
+    goToColumn(columnSearchMatches[matchPosition]);
+  }
+}
+
+function updateActiveColumnMatch(): void {
+  const options = elements.columnSearchResults.querySelectorAll<HTMLElement>(
+    '.column-search-option'
+  );
+  options.forEach((option, index) => {
+    const active = index === activeColumnMatch;
+    option.setAttribute('aria-selected', String(active));
+    if (active) {
+      elements.profileSearch.setAttribute('aria-activedescendant', option.id);
+      option.scrollIntoView({ block: 'nearest' });
+    }
+  });
+  if (activeColumnMatch < 0) elements.profileSearch.removeAttribute('aria-activedescendant');
+}
+
+function closeColumnSearchResults(): void {
+  columnSearchMatches = [];
+  activeColumnMatch = -1;
+  elements.columnSearchResults.replaceChildren();
+  elements.columnSearchResults.classList.add('hidden');
+  elements.profileSearch.setAttribute('aria-expanded', 'false');
+  elements.profileSearch.removeAttribute('aria-activedescendant');
+}
+
+function appendHighlightedText(container: HTMLElement, value: string, query: string): void {
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchStart = value.toLowerCase().indexOf(normalizedQuery);
+  if (!normalizedQuery || matchStart < 0) {
+    container.textContent = value;
+    return;
+  }
+  container.append(document.createTextNode(value.slice(0, matchStart)));
+  const mark = document.createElement('mark');
+  mark.textContent = value.slice(matchStart, matchStart + normalizedQuery.length);
+  container.append(mark, document.createTextNode(value.slice(matchStart + normalizedQuery.length)));
+}
+
+function goToColumn(columnIndex: number): void {
+  if (!dataset || columnIndex < 0 || columnIndex >= dataset.columns.length) return;
+  elements.profileSearch.value = dataset.columns[columnIndex];
+  closeColumnSearchResults();
+  const viewportWidth = Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH);
+  const target = centeredColumnScrollOffset(
+    dataset.columns.map((_column, index) => columnWidth(index)),
+    columnIndex,
+    viewportWidth
+  );
+  elements.tableScroll.scrollLeft = target;
+  elements.profiles.scrollLeft = target;
+  renderVirtualViewport();
+  elements.tableScroll.scrollIntoView({
+    block: 'nearest',
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  });
+  window.requestAnimationFrame(() => highlightColumnHeader(columnIndex));
+}
+
+function highlightColumnHeader(columnIndex: number): void {
+  const header = elements.tableHead.querySelector<HTMLElement>(
+    `.virtual-header-cell[data-column-index="${columnIndex}"]`
+  );
+  if (!header) return;
+  window.clearTimeout(columnHighlightTimer);
+  header.classList.add('column-jump-target');
+  header.querySelector<HTMLButtonElement>('.column-button')?.focus({ preventScroll: true });
+  columnHighlightTimer = window.setTimeout(
+    () => header.classList.remove('column-jump-target'),
+    1_400
+  );
 }
 
 function renderTable(): void {

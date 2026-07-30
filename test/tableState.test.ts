@@ -239,7 +239,7 @@ test('bounds restored column widths and discards retired visibility state', () =
   );
 });
 
-test('restores bounded profile search and collapse preferences', () => {
+test('restores profile collapse and discards the retired profile query', () => {
   const normalized = normalizeTableViewState(
     {
       query: '',
@@ -249,5 +249,5 @@ test('restores bounded profile search and collapse preferences', () => {
     dataset
   );
   assert.equal(normalized.ui?.profilesCollapsed, true);
-  assert.equal(normalized.ui?.profileQuery?.length, 200);
+  assert.equal('profileQuery' in (normalized.ui ?? {}), false);
 });

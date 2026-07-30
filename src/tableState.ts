@@ -148,18 +148,14 @@ export function normalizeTableViewState(value: unknown, dataset: DatasetPreview)
   );
   const profilesCollapsed =
     typeof rawUi?.profilesCollapsed === 'boolean' ? rawUi.profilesCollapsed : undefined;
-  const profileQuery =
-    typeof rawUi?.profileQuery === 'string' ? rawUi.profileQuery.slice(0, 200) : undefined;
   const ui =
     columnWidths ||
     selectedCell ||
-    profilesCollapsed !== undefined ||
-    profileQuery
+    profilesCollapsed !== undefined
       ? {
           ...(columnWidths ? { columnWidths } : {}),
           ...(selectedCell ? { selectedCell } : {}),
-          ...(profilesCollapsed !== undefined ? { profilesCollapsed } : {}),
-          ...(profileQuery ? { profileQuery } : {})
+          ...(profilesCollapsed !== undefined ? { profilesCollapsed } : {})
         }
       : undefined;
   return {

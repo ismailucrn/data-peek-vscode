@@ -6,8 +6,10 @@ import {
   VIRTUAL_OVERSCAN,
   calculateVirtualColumns,
   calculateVirtualRange,
+  centeredColumnScrollOffset,
   clampColumnWidth,
   estimateColumnWidth,
+  matchColumnNames,
   navigateSelection
 } from '../src/tableLayout';
 
@@ -16,6 +18,25 @@ test('clamps and estimates column widths', () => {
   assert.equal(clampColumnWidth(1_000), MAX_COLUMN_WIDTH);
   assert.equal(estimateColumnWidth('name', ['Ada', 'Grace']), 110);
   assert.equal(estimateColumnWidth('name', ['x'.repeat(200)]), MAX_COLUMN_WIDTH);
+});
+
+test('matches exact, prefix and substring column names in priority order', () => {
+  assert.deepEqual(
+    matchColumnNames(['event_date', 'date_column', 'created_date', 'DATE', 'name'], 'date'),
+    { matches: [3, 1, 0, 2], total: 4 }
+  );
+  assert.deepEqual(matchColumnNames(['a', 'ab', 'abc'], 'a', 2), {
+    matches: [0, 1],
+    total: 3
+  });
+  assert.deepEqual(matchColumnNames(['name'], '  '), { matches: [], total: 0 });
+});
+
+test('centers a variable-width column without exceeding scroll bounds', () => {
+  assert.equal(centeredColumnScrollOffset([100, 200, 80], 0, 180), 0);
+  assert.equal(centeredColumnScrollOffset([100, 200, 80], 1, 180), 110);
+  assert.equal(centeredColumnScrollOffset([100, 200, 80], 2, 180), 200);
+  assert.equal(centeredColumnScrollOffset([100], 4, 180), 0);
 });
 
 test('navigates cells using visible row and column order', () => {

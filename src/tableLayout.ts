@@ -18,6 +18,11 @@ export interface VirtualColumnRange extends VirtualRange {
   total: number;
 }
 
+export interface ColumnMatchResult {
+  matches: number[];
+  total: number;
+}
+
 export type NavigationKey =
   | 'ArrowLeft'
   | 'ArrowRight'
@@ -30,6 +35,50 @@ export type NavigationKey =
 
 export function clampColumnWidth(width: number): number {
   return Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width)));
+}
+
+export function matchColumnNames(
+  columns: string[],
+  query: string,
+  limit = 20
+): ColumnMatchResult {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return { matches: [], total: 0 };
+  const exact: number[] = [];
+  const prefixes: number[] = [];
+  const contains: number[] = [];
+  columns.forEach((column, columnIndex) => {
+    const normalizedColumn = column.toLowerCase();
+    if (normalizedColumn === normalizedQuery) exact.push(columnIndex);
+    else if (normalizedColumn.startsWith(normalizedQuery)) prefixes.push(columnIndex);
+    else if (normalizedColumn.includes(normalizedQuery)) contains.push(columnIndex);
+  });
+  const allMatches = [...exact, ...prefixes, ...contains];
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  return {
+    matches: allMatches.slice(0, safeLimit),
+    total: allMatches.length
+  };
+}
+
+export function centeredColumnScrollOffset(
+  widths: number[],
+  columnIndex: number,
+  viewportWidth: number
+): number {
+  if (
+    !Number.isInteger(columnIndex) ||
+    columnIndex < 0 ||
+    columnIndex >= widths.length ||
+    viewportWidth <= 0
+  ) return 0;
+  const safeWidths = widths.map((width) => Math.max(0, width));
+  const columnStart = safeWidths
+    .slice(0, columnIndex)
+    .reduce((total, width) => total + width, 0);
+  const totalWidth = safeWidths.reduce((total, width) => total + width, 0);
+  const target = columnStart + safeWidths[columnIndex] / 2 - viewportWidth / 2;
+  return Math.max(0, Math.min(target, Math.max(0, totalWidth - viewportWidth)));
 }
 
 export function estimateColumnWidth(columnName: string, values: SerializableCell[]): number {

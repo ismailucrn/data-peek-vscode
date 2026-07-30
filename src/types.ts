@@ -43,7 +43,6 @@ export interface TableViewState {
     columnWidths?: Record<string, number>;
     selectedCell?: CellSelection;
     profilesCollapsed?: boolean;
-    profileQuery?: string;
   };
 }
 
