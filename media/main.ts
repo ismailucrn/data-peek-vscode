@@ -148,6 +148,9 @@ const elements = {
   copyColumnName: requiredElement<HTMLButtonElement>('copy-column-name')
 };
 
+// Parsing controls are secondary to inspection, so keep them after the data workspace.
+elements.workspace.append(elements.parsingSection);
+
 let dataset: DatasetPreview | null = null;
 let tableState: TableViewState = { ...EMPTY_TABLE_VIEW_STATE, filters: [] };
 let searchTimer = 0;

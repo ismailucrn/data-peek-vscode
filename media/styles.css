@@ -130,7 +130,7 @@ input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='
 }
 
 .parsing-section {
-  margin: -8px 0 20px;
+  margin: 20px 0 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
