@@ -6,7 +6,7 @@ import {
   operatorNeedsValue,
   operatorsForType
 } from '../src/tableState';
-import { formatCellDetail } from '../src/cellView';
+import { formatCellDetail, formatCellDisplay } from '../src/cellView';
 import {
   validateDelimitedParsingSettings
 } from '../src/parsing';
@@ -668,15 +668,29 @@ function renderQualityWarnings(): void {
   elements.qualityWarnings.replaceChildren();
   const fragment = document.createDocumentFragment();
   for (const warning of dataset.qualityWarnings) {
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = `quality-warning quality-${warning.code}`;
+    const columnIndex = warning.columnIndex;
+    const canNavigate =
+      columnIndex !== undefined && columnIndex >= 0 && columnIndex < dataset.columns.length;
+    item.disabled = !canNavigate;
+    if (canNavigate) {
+      const columnName = dataset.columns[columnIndex];
+      item.setAttribute('aria-label', `${warning.message} Go to column ${columnName}.`);
+      item.addEventListener('click', () => goToColumn(columnIndex));
+    }
     const icon = document.createElement('span');
     icon.className = 'quality-icon';
     icon.textContent = '•';
     icon.setAttribute('aria-hidden', 'true');
     const message = document.createElement('span');
+    message.className = 'quality-message';
     message.textContent = warning.message;
-    item.append(icon, message);
+    const action = document.createElement('span');
+    action.className = 'quality-action';
+    action.textContent = canNavigate ? 'Go to column' : '';
+    item.append(icon, message, action);
     fragment.appendChild(item);
   }
   elements.qualityWarnings.appendChild(fragment);
@@ -1096,7 +1110,8 @@ function configureDataCell(
   const selection = tableState.ui?.selectedCell;
   const selected = selection?.rowIndex === item.index && selection.columnIndex === columnIndex;
   resetVirtualElement(cell, `virtual-cell${selected ? ' selected' : ''}`);
-  cell.dataset.type = dataset.profiles[columnIndex]?.type ?? 'text';
+  const type = dataset.profiles[columnIndex]?.type ?? 'text';
+  cell.dataset.type = type;
   cell.dataset.rowIndex = String(item.index);
   cell.dataset.columnIndex = String(columnIndex);
   setElementWidth(cell, renderedColumnWidth(columnIndex));
@@ -1104,7 +1119,7 @@ function configureDataCell(
   cell.setAttribute('aria-colindex', String(columnIndex + 2));
   cell.setAttribute('aria-selected', String(selected));
   cell.tabIndex = selected ? 0 : -1;
-  renderCell(cell, item.row[columnIndex] ?? null);
+  renderCell(cell, item.row[columnIndex] ?? null, type);
 }
 
 function resetVirtualElement(element: HTMLElement, className: string): void {
@@ -1136,15 +1151,19 @@ function setElementWidth(element: HTMLElement, width: number): void {
   element.style.flexBasis = `${width}px`;
 }
 
-function renderCell(cell: HTMLElement, value: SerializableCell): void {
+function renderCell(
+  cell: HTMLElement,
+  value: SerializableCell,
+  type: DatasetPreview['profiles'][number]['type']
+): void {
   if (value === null) {
     cell.classList.add('null');
-    cell.textContent = 'null';
+    cell.textContent = formatCellDisplay(value, type);
     return;
   }
-  const text = String(value);
-  cell.textContent = text;
-  cell.title = text;
+  const raw = String(value);
+  cell.textContent = formatCellDisplay(value, type);
+  cell.title = raw;
 }
 
 function renderHeaders(columnRange: VirtualColumnRange): void {

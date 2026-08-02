@@ -4,6 +4,13 @@ All notable changes to Data Peek are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Clickable data-quality warnings that navigate to and highlight the affected column.
+- Display-only formatting for numbers, dates, booleans, and nulls while selected-cell details retain raw values.
+
 ## [0.6.1] - 2026-07-19
 
 ### Changed

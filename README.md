@@ -10,10 +10,10 @@ Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TS
 - Sort columns and scroll large tables with two-axis virtualization.
 - Resize columns.
 - Find matching column names and jump directly to the selected table column.
-- Navigate cells with the keyboard and inspect the complete selected value.
+- Navigate cells with the keyboard, view readable typed values, and inspect the complete raw selected value.
 - Copy a cell, row, or column name to the clipboard.
 - View background-calculated full-data profiles for numeric, boolean, date, text, mixed, and empty columns.
-- Review missing and unique ratios, distributions, top values, and data-quality warnings.
+- Review missing and unique ratios, distributions, top values, and data-quality warnings that jump to the affected column.
 - Switch between worksheets in an Excel workbook.
 - Adjust session-only parsing settings for CSV and TSV files.
 - Use the editor in VS Code light, dark, and high-contrast themes.
