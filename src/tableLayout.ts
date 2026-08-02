@@ -37,6 +37,32 @@ export function clampColumnWidth(width: number): number {
   return Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width)));
 }
 
+export function fitColumnWidths(
+  widths: number[],
+  viewportWidth: number,
+  fixedWidths: boolean[] = []
+): number[] {
+  const fitted = widths.map((width) => Math.max(0, Math.round(width)));
+  let remaining = Math.max(0, Math.floor(viewportWidth))
+    - fitted.reduce((total, width) => total + width, 0);
+  if (remaining <= 0) return fitted;
+
+  let expandable = fitted
+    .map((_width, index) => index)
+    .filter((index) => !fixedWidths[index] && fitted[index] < MAX_COLUMN_WIDTH);
+  while (remaining > 0 && expandable.length > 0) {
+    const share = Math.max(1, Math.floor(remaining / expandable.length));
+    for (const index of expandable) {
+      const addition = Math.min(remaining, share, MAX_COLUMN_WIDTH - fitted[index]);
+      fitted[index] += addition;
+      remaining -= addition;
+      if (remaining === 0) break;
+    }
+    expandable = expandable.filter((index) => fitted[index] < MAX_COLUMN_WIDTH);
+  }
+  return fitted;
+}
+
 export function matchColumnNames(
   columns: string[],
   query: string,

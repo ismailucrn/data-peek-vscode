@@ -23,6 +23,7 @@ import {
   centeredColumnScrollOffset,
   clampColumnWidth,
   estimateColumnWidth,
+  fitColumnWidths,
   matchColumnNames,
   navigateSelection
 } from '../src/tableLayout';
@@ -930,7 +931,7 @@ function goToColumn(columnIndex: number): void {
   closeColumnSearchResults();
   const viewportWidth = Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH);
   const target = centeredColumnScrollOffset(
-    dataset.columns.map((_column, index) => columnWidth(index)),
+    virtualColumnWidths,
     columnIndex,
     viewportWidth
   );
@@ -975,7 +976,14 @@ function renderTable(): void {
   virtualRows = applyTableView(dataset, tableState);
   virtualRowIndexes = virtualRows.map((item) => item.index);
   virtualColumnOrder = Array.from({ length: dataset.columns.length }, (_, index) => index);
-  virtualColumnWidths = virtualColumnOrder.map(columnWidth);
+  const savedWidths = tableState.ui?.columnWidths ?? {};
+  virtualColumnWidths = fitColumnWidths(
+    virtualColumnOrder.map(columnWidth),
+    Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH),
+    virtualColumnOrder.map((columnIndex) =>
+      Object.prototype.hasOwnProperty.call(savedWidths, String(columnIndex))
+    )
+  );
   const selection = ensureValidSelection(virtualRowIndexes, virtualColumnOrder);
   const contentWidth = ROW_INDEX_WIDTH + virtualColumnWidths.reduce(
     (width, columnWidthValue) => width + columnWidthValue,
@@ -1091,7 +1099,7 @@ function configureDataCell(
   cell.dataset.type = dataset.profiles[columnIndex]?.type ?? 'text';
   cell.dataset.rowIndex = String(item.index);
   cell.dataset.columnIndex = String(columnIndex);
-  setElementWidth(cell, columnWidth(columnIndex));
+  setElementWidth(cell, renderedColumnWidth(columnIndex));
   cell.setAttribute('role', 'gridcell');
   cell.setAttribute('aria-colindex', String(columnIndex + 2));
   cell.setAttribute('aria-selected', String(selected));
@@ -1224,7 +1232,7 @@ function createHeaderCell(columnIndex: number): HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       const startX = event.clientX;
-      const startWidth = columnWidth(columnIndex);
+      const startWidth = renderedColumnWidth(columnIndex);
       let nextWidth = startWidth;
       let pointerFrame = 0;
       resizeHandle.setPointerCapture(event.pointerId);
@@ -1258,7 +1266,7 @@ function createHeaderCell(columnIndex: number): HTMLElement {
       const direction = event.key === 'ArrowLeft' ? -1 : 1;
       setColumnWidth(
         columnIndex,
-        columnWidth(columnIndex) + direction * (event.shiftKey ? 40 : 10),
+        renderedColumnWidth(columnIndex) + direction * (event.shiftKey ? 40 : 10),
         false
       );
       persistState();
@@ -1285,6 +1293,13 @@ function createHeaderCell(columnIndex: number): HTMLElement {
 
 function columnWidth(columnIndex: number): number {
   return tableState.ui?.columnWidths?.[String(columnIndex)] ?? DEFAULT_COLUMN_WIDTH;
+}
+
+function renderedColumnWidth(columnIndex: number): number {
+  const position = virtualColumnOrder.indexOf(columnIndex);
+  return position >= 0
+    ? (virtualColumnWidths[position] ?? columnWidth(columnIndex))
+    : columnWidth(columnIndex);
 }
 
 function setColumnWidth(columnIndex: number, width: number, render = true): void {
@@ -1314,7 +1329,7 @@ function setColumnWidth(columnIndex: number, width: number, render = true): void
 }
 
 function applyColumnDimensions(element: HTMLElement, columnIndex: number): void {
-  const width = `${columnWidth(columnIndex)}px`;
+  const width = `${renderedColumnWidth(columnIndex)}px`;
   element.style.width = width;
   element.style.flexBasis = width;
   element.style.minWidth = width;
@@ -1370,10 +1385,10 @@ function scrollSelectionIntoView(selection: CellSelection, rowPosition: number):
 
   const columnPosition = virtualColumnOrder.indexOf(selection.columnIndex);
   if (columnPosition < 0) return;
-  const columnStart = virtualColumnOrder
+  const columnStart = virtualColumnWidths
     .slice(0, columnPosition)
-    .reduce((width, columnIndex) => width + columnWidth(columnIndex), 0);
-  const columnEnd = columnStart + columnWidth(selection.columnIndex);
+    .reduce((width, columnWidthValue) => width + columnWidthValue, 0);
+  const columnEnd = columnStart + renderedColumnWidth(selection.columnIndex);
   const visibleWidth = Math.max(0, elements.tableScroll.clientWidth - ROW_INDEX_WIDTH);
   if (columnStart < elements.tableScroll.scrollLeft) {
     elements.tableScroll.scrollLeft = columnStart;

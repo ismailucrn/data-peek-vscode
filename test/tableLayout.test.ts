@@ -9,6 +9,7 @@ import {
   centeredColumnScrollOffset,
   clampColumnWidth,
   estimateColumnWidth,
+  fitColumnWidths,
   matchColumnNames,
   navigateSelection
 } from '../src/tableLayout';
@@ -18,6 +19,16 @@ test('clamps and estimates column widths', () => {
   assert.equal(clampColumnWidth(1_000), MAX_COLUMN_WIDTH);
   assert.equal(estimateColumnWidth('name', ['Ada', 'Grace']), 110);
   assert.equal(estimateColumnWidth('name', ['x'.repeat(200)]), MAX_COLUMN_WIDTH);
+});
+
+test('fits automatic column widths to the viewport without overriding fixed widths', () => {
+  assert.deepEqual(fitColumnWidths([160, 160, 160, 160], 1_000), [250, 250, 250, 250]);
+  assert.deepEqual(
+    fitColumnWidths([160, 160, 160, 160], 1_000, [true, false, false, false]),
+    [160, 280, 280, 280]
+  );
+  assert.deepEqual(fitColumnWidths([160, 160], 1_500), [MAX_COLUMN_WIDTH, MAX_COLUMN_WIDTH]);
+  assert.deepEqual(fitColumnWidths([400, 400, 400], 1_000), [400, 400, 400]);
 });
 
 test('matches exact, prefix and substring column names in priority order', () => {
