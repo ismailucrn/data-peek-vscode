@@ -2,6 +2,14 @@
 
 Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TSV, Parquet, and Excel files in VS Code. It lets you review a file's structure, sample rows, and basic quality signals without writing Pandas or notebook code.
 
+## Supported files
+
+| Format | Extensions | Notes |
+| --- | --- | --- |
+| Delimited text | `.csv`, `.tsv` | Session-only parsing controls for delimiters, encodings, headers, null tokens, and localized numbers |
+| Apache Parquet | `.parquet` | Bounded preview and full-data profiling with an uncompressed-data safety guard |
+| Microsoft Excel | `.xlsx`, `.xlsm` | Worksheet selection and ZIP archive validation before the workbook is loaded |
+
 ## Features
 
 - Open `.csv`, `.tsv`, `.parquet`, `.xlsx`, and `.xlsm` files.
@@ -33,6 +41,14 @@ The bounded table preview appears first. When the source has more rows, column p
 3. Search, filter, sort, jump to a column, or adjust column widths in the preview.
 4. Copy the selected cell, row, or column name when needed.
 
+You can also open a supported file normally, open the editor-title context menu, and select **Open with Data Peek**. Data Peek remains an optional custom editor and does not replace the source file's default editor.
+
+### Preview and full-data profiles
+
+Data Peek loads a bounded table preview first so that large files remain responsive. Search, filters, sorting, navigation, and row copying operate on this loaded preview only.
+
+If the file contains more rows than the preview, Data Peek calculates column profiles in a background worker. Profile results and data-quality warnings can therefore describe the complete dataset even though the interactive table contains only the configured number of preview rows. When bounded-memory estimates are used, affected values are marked with `≈`.
+
 ## Settings
 
 | Setting | Default | Range | Description |
@@ -41,7 +57,7 @@ The bounded table preview appears first. When the source has more rows, column p
 | `dataPeek.maxColumns` | `500` | `10–2000` | Maximum columns loaded into the preview |
 | `dataPeek.maxExcelFileSizeMB` | `100` | `1–1000` | Maximum Excel workbook size that may be loaded into memory |
 | `dataPeek.maxExcelExpandedSizeMB` | `250` | `10–2000` | Maximum allowed uncompressed size of an Excel ZIP archive |
-| `dataPeek.maxProfileScanSizeMB` | `1024` | `64–8192` | Maximum source or selected uncompressed Parquet data scanned for full-data profiles |
+| `dataPeek.maxProfileScanSizeMB` | `1024` | `64–8192` | Maximum source file size scanned for full-data profiles; Parquet also applies this limit to selected uncompressed data |
 
 ## CSV and TSV parsing
 
@@ -59,22 +75,78 @@ Settings apply only to the open editor session; they are not written to the sour
 
 ## Development
 
-Requirements: Node.js and pnpm.
+Requirements:
+
+- VS Code 1.100.0 or newer
+- Node.js
+- pnpm 10.34.5 (the version declared by `packageManager` in `package.json`)
+
+Install dependencies:
 
 ```sh
 pnpm install
+```
+
+If pnpm is not available, a recent Node.js installation can activate the declared version through Corepack:
+
+```sh
+corepack enable
+corepack prepare pnpm@10.34.5 --activate
+pnpm install
+```
+
+### Run the extension locally
+
+1. Open this repository in VS Code.
+2. Start the build watcher in the integrated terminal:
+
+   ```sh
+   pnpm run watch
+   ```
+
+3. Press `F5` or select **Run and Debug → Run Data Peek Extension**.
+4. In the new Extension Development Host window, right-click a supported data file and select **Open with Data Peek**.
+
+The watcher rebuilds the extension and webview bundles as files change. Reload the Extension Development Host when a code change is not reflected automatically.
+
+### Validate changes
+
+Run the type checker and test suite while developing:
+
+```sh
 pnpm run check
 pnpm test
+```
+
+Create the production bundles before handing off a completed change:
+
+```sh
 pnpm run package
 ```
 
-To start a local Extension Development Host:
+To build an installable VSIX package:
 
 ```sh
-pnpm run watch
+pnpm run vsix
 ```
 
-Then open the project in VS Code, press `F5`, and select a supported file in the launched development window.
+Generated `dist/` and `.test-dist/` output is not tracked in the repository.
+
+## Project structure
+
+- `src/extension.ts`: extension activation and command/editor registration
+- `src/dataEditorProvider.ts`: custom-editor lifecycle and extension-to-webview communication
+- `src/dataReader.ts`: bounded CSV, TSV, Parquet, and Excel readers
+- `src/profile.ts` and `src/dataQuality.ts`: column profiles and deterministic quality warnings
+- `media/main.ts` and `media/styles.css`: interactive table behavior and VS Code-theme-aware presentation
+- `test/`: reader, parsing, profiling, state, layout, clipboard, and safety tests
+
+## Product boundaries
+
+- Data Peek is an inspection tool; it does not edit, save, or overwrite source datasets.
+- The interactive table is a bounded preview, not an unbounded full-file grid.
+- Full-data profiling may be unavailable when a file exceeds configured safety limits or cannot be parsed safely. The preview remains available when possible, and the UI reports the profiling error.
+- CSV and TSV parsing changes apply only to the current editor session.
 
 ## License
 
