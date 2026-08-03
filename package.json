@@ -141,7 +141,7 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@types/vscode": "1.100.0",
     "@types/yauzl": "^3.4.0",
     "@vscode/vsce": "3.9.2",
