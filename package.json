@@ -141,12 +141,12 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@types/vscode": "1.100.0",
     "@types/yauzl": "^3.4.0",
     "@vscode/vsce": "3.9.2",
     "esbuild": "^0.28.1",
-    "hyparquet-writer": "^0.16.1",
+    "hyparquet-writer": "^0.16.5",
     "typescript": "^7.0.2"
   },
   "overrides": {
