@@ -2,6 +2,8 @@
 
 Data Peek is a read-only custom editor for quickly and safely inspecting CSV, TSV, Parquet, and Excel files in VS Code. It lets you review a file's structure, sample rows, and basic quality signals without writing Pandas or notebook code.
 
+![Data Peek preview in VS Code](images/data-peek-demo.gif)
+
 ## Supported files
 
 | Format | Extensions | Notes |
