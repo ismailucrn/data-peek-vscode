@@ -29,6 +29,7 @@ import {
 const SUPPORTED_EXTENSIONS = new Set(['.csv', '.tsv', '.parquet', '.xlsx', '.xlsm']);
 const MAX_CSV_RECORD_BYTES = 2 * 1024 * 1024;
 const MAX_PREVIEW_CELLS = 250_000;
+const MAX_PREVIEW_CHARACTERS = 8 * 1024 * 1024;
 const MAX_PARQUET_PREVIEW_EXPANDED_BYTES = 256n * 1024n * 1024n;
 
 interface ProfileScanResult {
@@ -278,31 +279,24 @@ async function profileExcel(
   if (!worksheet) throw new Error('The workbook does not contain a worksheet.');
   const builder = new StreamingProfileBuilder(columns);
   let rowCount = 0;
-  let headerRowNumber = 1;
-  while (
-    headerRowNumber <= worksheet.actualRowCount &&
-    !worksheet.getRow(headerRowNumber).hasValues
-  ) {
-    headerRowNumber += 1;
-  }
-  const possibleRows = Math.max(0, worksheet.actualRowCount - headerRowNumber);
+  let headerFound = false;
+  let processedRows = 0;
+  const possibleRows = Math.max(0, worksheet.actualRowCount - 1);
   const report = progressReporter(options.onProgress, possibleRows);
-  for (
-    let rowNumber = headerRowNumber + 1;
-    rowNumber <= worksheet.actualRowCount;
-    rowNumber += 1
-  ) {
+  worksheet.eachRow((row) => {
     ensureNotCancelled(options.isCancelled);
-    const row = worksheet.getRow(rowNumber);
-    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
-    if (values.every((value) => value === null)) continue;
-    builder.addRow(values);
-    rowCount += 1;
-    if (rowNumber % 1_000 === 0) {
-      report(Math.min(possibleRows, rowNumber - headerRowNumber));
-      await new Promise<void>((resolve) => setImmediate(resolve));
+    if (!headerFound) {
+      headerFound = true;
+      return;
     }
-  }
+    processedRows += 1;
+    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
+    if (!values.every((value) => value === null)) {
+      builder.addRow(values);
+      rowCount += 1;
+    }
+    if (processedRows % 1_000 === 0) report(processedRows);
+  });
   report(possibleRows, true);
   return { profiles: builder.finish(rowCount), rowCount };
 }
@@ -362,6 +356,7 @@ async function readDelimited(
   const rows: SerializableCell[][] = [];
   let sawExtraRow = false;
   let effectiveLimit = limit;
+  let previewCharacters = 0;
   const nullTokens = new Set(settings.nullTokens);
 
   try {
@@ -378,20 +373,30 @@ async function readDelimited(
                 { length: rawRecordValues.length },
                 (_unused, index) => `column_${index + 1}`
               );
+        previewCharacters = previewRowCharacters(columns);
         effectiveLimit = previewRowLimit(limit, columns.length);
         if (settings.header === 'firstNonEmpty') continue;
       }
       const record = rawValues
         .slice(0, maxColumns)
         .map((value) => delimitedCellValue(value, settings, nullTokens));
+      const previousColumnCount = columns.length;
       ensureColumns(columns, Math.min(record.length, maxColumns));
+      for (let columnIndex = previousColumnCount; columnIndex < columns.length; columnIndex += 1) {
+        previewCharacters += columns[columnIndex].length;
+      }
       effectiveLimit = previewRowLimit(limit, columns.length);
-      if (rows.length >= effectiveLimit) {
+      const recordCharacters = previewRowCharacters(record);
+      if (
+        rows.length >= effectiveLimit ||
+        previewCharacters + recordCharacters > MAX_PREVIEW_CHARACTERS
+      ) {
         if (rows.length > effectiveLimit) rows.length = effectiveLimit;
         sawExtraRow = true;
         break;
       }
       rows.push(record);
+      previewCharacters += recordCharacters;
     }
   } finally {
     input.destroy();
@@ -460,7 +465,15 @@ async function readParquet(
     }
   });
   ensureNotCancelled(isCancelled);
-  const rows = rawRows.map((row) => columns.map((_column, index) => normalizeCell(row[index])));
+  const rows: SerializableCell[][] = [];
+  let previewCharacters = previewRowCharacters(columns);
+  for (const rawRow of rawRows) {
+    const row = columns.map((_column, index) => normalizeCell(rawRow[index]));
+    const rowCharacters = previewRowCharacters(row);
+    if (previewCharacters + rowCharacters > MAX_PREVIEW_CHARACTERS) break;
+    rows.push(row);
+    previewCharacters += rowCharacters;
+  }
 
   return makePreview({
     filePath,
@@ -498,26 +511,37 @@ async function readExcel(
   const rows: SerializableCell[][] = [];
   let effectiveLimit = limit;
   let sawExtraRow = false;
+  let previewCharacters = 0;
+  const previewComplete = Symbol('previewComplete');
 
-  worksheet.eachRow((row) => {
-    ensureNotCancelled(isCancelled);
-    if (!columns) {
-      const width = Math.min(Math.max(totalColumns, row.cellCount), maxColumns);
-      columns = uniqueHeaders(
-        Array.from({ length: width }, (_, index) => excelCellValue(row.getCell(index + 1)))
-      );
-      effectiveLimit = previewRowLimit(limit, columns.length);
-      return;
-    }
-    if (sawExtraRow) return;
-    const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
-    if (values.every((value) => value === null)) return;
-    if (rows.length >= effectiveLimit) {
-      sawExtraRow = true;
-      return;
-    }
-    rows.push(values);
-  });
+  try {
+    worksheet.eachRow((row) => {
+      ensureNotCancelled(isCancelled);
+      if (!columns) {
+        const width = Math.min(Math.max(totalColumns, row.cellCount), maxColumns);
+        columns = uniqueHeaders(
+          Array.from({ length: width }, (_, index) => excelCellValue(row.getCell(index + 1)))
+        );
+        previewCharacters = previewRowCharacters(columns);
+        effectiveLimit = previewRowLimit(limit, columns.length);
+        return;
+      }
+      const values = columns.map((_column, index) => excelCellValue(row.getCell(index + 1)));
+      if (values.every((value) => value === null)) return;
+      const rowCharacters = previewRowCharacters(values);
+      if (
+        rows.length >= effectiveLimit ||
+        previewCharacters + rowCharacters > MAX_PREVIEW_CHARACTERS
+      ) {
+        sawExtraRow = true;
+        throw previewComplete;
+      }
+      rows.push(values);
+      previewCharacters += rowCharacters;
+    });
+  } catch (error) {
+    if (error !== previewComplete) throw error;
+  }
 
   if (!columns) {
     return makePreview({
@@ -721,6 +745,14 @@ function countTruncatedCells(rows: SerializableCell[][]): number {
 function previewRowLimit(requestedRows: number, columnCount: number): number {
   const cellLimitedRows = Math.max(1, Math.floor(MAX_PREVIEW_CELLS / Math.max(1, columnCount)));
   return Math.min(requestedRows, cellLimitedRows);
+}
+
+function previewRowCharacters(values: readonly SerializableCell[] | readonly string[]): number {
+  let total = 0;
+  for (const value of values) {
+    if (value !== null) total += String(value).length;
+  }
+  return total;
 }
 
 function validateParquetExpandedSize(

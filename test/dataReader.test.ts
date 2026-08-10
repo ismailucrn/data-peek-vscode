@@ -75,6 +75,31 @@ test('preserves the 250,000-cell budget at configured row and column limits', as
   });
 });
 
+test('bounds aggregate text retained by a delimited preview', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'large-text.csv');
+    const value = 'x'.repeat(100_000);
+    await fs.writeFile(
+      filePath,
+      `value\n${Array.from({ length: 90 }, () => value).join('\n')}\n`,
+      'utf8'
+    );
+
+    const preview = await loadPreview(filePath, options);
+    const retainedCharacters = preview.rows.reduce<number>(
+      (total, row) => total + row.reduce<number>(
+        (rowTotal, cell) => rowTotal + (cell === null ? 0 : String(cell).length),
+        0
+      ),
+      preview.columns.reduce((total, column) => total + column.length, 0)
+    );
+    assert.ok(retainedCharacters <= 8 * 1024 * 1024);
+    assert.ok(preview.rows.length < 90);
+    assert.equal(preview.truncation.rows, true);
+    assert.equal(preview.totalRows, null);
+  });
+});
+
 test('reapplies the cell budget when a later delimited row widens the preview', async () => {
   await withTemporaryDirectory(async (directory) => {
     const filePath = path.join(directory, 'late-wide.csv');
@@ -317,6 +342,29 @@ test('reads worksheets from an Excel workbook', async () => {
   });
 });
 
+test('stops walking Excel rows after the bounded preview is filled', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const filePath = path.join(directory, 'many-rows.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Rows');
+    worksheet.addRow(['value']);
+    for (let index = 0; index < 1_000; index += 1) worksheet.addRow([index]);
+    await workbook.xlsx.writeFile(filePath);
+
+    let cancellationChecks = 0;
+    const preview = await loadPreview(filePath, {
+      ...options,
+      isCancelled: () => {
+        cancellationChecks += 1;
+        return false;
+      }
+    });
+    assert.equal(preview.rows.length, 100);
+    assert.equal(preview.truncation.rows, true);
+    assert.ok(cancellationChecks < 200);
+  });
+});
+
 test('reads sparse Excel rows without losing the true column extent', async () => {
   await withTemporaryDirectory(async (directory) => {
     const filePath = path.join(directory, 'sparse.xlsx');
@@ -331,6 +379,15 @@ test('reads sparse Excel rows without losing the true column extent', async () =
     assert.equal(preview.totalColumns, 26);
     assert.equal(preview.truncatedColumns, true);
     assert.deepEqual(preview.rows, [['late row', ...Array.from({ length: 9 }, () => null)]]);
+
+    const full = await loadFullProfiles(filePath, {
+      ...options,
+      maxColumns: 10,
+      columns: preview.columns,
+      sheet: preview.sheet
+    });
+    assert.equal(full.rowCount, 1);
+    assert.deepEqual(full.profiles[0].topValues, [{ value: 'late row', count: 1 }]);
   });
 });
 

@@ -11,6 +11,16 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Clickable data-quality warnings that navigate to and highlight the affected column.
 - Display-only formatting for numbers, dates, booleans, and nulls while selected-cell details retain raw values.
 
+### Fixed
+
+- Included sparse worksheet rows in full-data Excel profiles without walking or materializing empty row gaps.
+- Excluded local sample-data corpora from Marketplace packages.
+
+### Security
+
+- Pinned vulnerable transitive brace-expansion releases to patched versions.
+- Bounded aggregate normalized text retained by previews to prevent multi-gigabyte allocations from adversarial delimited files.
+
 ## [0.6.1] - 2026-07-19
 
 ### Changed
