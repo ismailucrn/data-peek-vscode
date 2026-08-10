@@ -134,7 +134,7 @@
     "vsix": "pnpm run package && vsce package --no-dependencies"
   },
   "dependencies": {
-    "csv-parse": "^7.0.1",
+    "csv-parse": "^7.0.2",
     "exceljs": "^4.4.0",
     "hyparquet": "^1.26.2",
     "hyparquet-compressors": "^1.1.1",
