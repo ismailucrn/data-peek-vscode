@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-10
+
 ### Added
 
 - Clickable data-quality warnings that navigate to and highlight the affected column.
@@ -98,6 +100,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Search, sorting, pagination, worksheet selection, and bounded column profiles.
 - Safety limits for wide data, large cells, Excel archives, and Parquet previews.
 
+[0.6.2]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ismailucrn/data-peek-vscode/compare/v0.4.0...v0.5.0
