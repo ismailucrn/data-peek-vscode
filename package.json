@@ -4,6 +4,7 @@
   "description": "Inspect CSV, Parquet and Excel files directly in VS Code without writing code.",
   "version": "0.6.2",
   "publisher": "ismailucrn",
+  "icon": "images/data-peek-icon-transparent.png",
   "license": "MIT",
   "packageManager": "pnpm@10.34.5",
   "repository": {

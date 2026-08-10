@@ -7,6 +7,8 @@ CONTRIBUTING.md
 SECURITY.md
 src/**
 media/**/*.ts
+images/data-peek-icon.png
+images/logo-options/**
 test/**
 sample-data/**
 .test-dist/**
